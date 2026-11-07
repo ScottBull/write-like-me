@@ -1,15 +1,19 @@
-"""Render the draft / critique / revise prompts (the run-1 "F" pipeline) from templates.
+"""Prompt rendering from templates.
 
-Shared by the interactive write-as-me skill (via `wlm.py kit`) and by voice-check's scripted
-generation, so what gets evaluated is what people use.
+`context_template()` / `render_context()`: the archive context (`templates/context.md`, the pilot's
+preface and "write the next entry" framing) that `select.assemble()` fills and `draft.py` sends.
+`learned_for()`: the learned.md notes that apply to one draft (rendered into the same file).
+`habits_block()`: the "How my messages vary" note after them (text from habits.py).
+`render_task()`: the task for voice-check's plain baseline (templates/baseline.md).
+Shared by the write-as-me skill and voice-check's scripted generation, so what gets evaluated is
+what people use.
 """
 import os
 import re
 
-from .llm import fill, split_template
+from .llm import split_template
 from .common import REGISTERS
-from .retrieve import format_examples, recipient_match, retrieve
-from .rules import rules_section
+from .retrieve import recipient_match
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES = os.path.join(os.path.dirname(os.path.dirname(HERE)), "templates")
@@ -20,15 +24,106 @@ KIND = {
     "prompt": ("prompt", "prompts to an AI assistant", "prompts to an AI assistant"),
     "post": ("comment", "posts and comments", "a public forum (Reddit)"),
 }
-SUPPLEMENT_MIN = 15   # below this many samples, borrow mechanics from another register
-# Prose registers borrow from public posts (the person's own longer prose) while they are thin,
-# a higher bar than SUPPLEMENT_MIN because a few dozen short emails say little about long ones.
-SUPPLEMENT_FROM = {"email": "post", "doc": "post"}
-SUPPLEMENT_PROSE_MIN = 40
 
 
 def template(name):
     return split_template(os.path.join(TEMPLATES, name))
+
+
+# Per-register wording for templates/context.md. For `post` it reproduces the pilot's preface.
+CONTEXT_WORDS = {
+    "chat": {"kinds": "chat messages", "kind": "message", "wrote": "sent",
+             "entry_shows": "who it was to, the date, a shortened version of the message I was replying to "
+                            "(when there was one)",
+             "new_one": "a new message I'm replying to"},
+    "email": {"kinds": "emails", "kind": "email", "wrote": "sent",
+              "entry_shows": "who it was to, the date, a shortened version of the email I was replying to "
+                             "(when there was one)",
+              "new_one": "a new email I'm replying to"},
+    "post": {"kinds": "posts and comments", "kind": "comment", "wrote": "posted",
+             "entry_shows": "where I posted it, the date, a shortened version of the post or comment I was "
+                            "replying to",
+             "new_one": "a new post I'm replying to"},
+    "doc": {"kinds": "passages from my documents", "kind": "passage", "wrote": "wrote",
+            "entry_shows": "the date, a shortened version of what the passage followed (when there was "
+                           "something)",
+            "new_one": "the context for a new passage"},
+    "prompt": {"kinds": "prompts to an AI assistant", "kind": "prompt", "wrote": "wrote",
+               "entry_shows": "the date, a shortened version of the assistant's reply I was answering (when "
+                              "there was one)",
+               "new_one": "the assistant's latest reply"},
+}
+CONTEXT_KEYS = ("archive", "wrote", "entry_shows", "kind", "new_one", "person", "person_text", "entries", "task",
+                "learned", "learned_text", "habits", "habits_text")
+
+
+def _fill_once(tmpl, values):
+    """Replace {key} placeholders in one pass, so text substituted in (real messages, which may
+    contain braces) is never itself searched for placeholders."""
+    return re.sub(r"\{(%s)\}" % "|".join(CONTEXT_KEYS), lambda m: str(values.get(m.group(1), m.group(0))), tmpl)
+
+
+def context_sections():
+    """{system, person, learned, habits, user} template text from templates/context.md."""
+    system, user = template("context.md")
+    system, rest = system.split("=== PERSON ===", 1)
+    person, rest = rest.split("=== LEARNED ===", 1)
+    learned, habits = rest.split("=== HABITS ===", 1)
+    return {"system": system.strip(), "person": person.strip(), "learned": learned.strip(),
+            "habits": habits.strip(), "user": user}
+
+
+def context_template():
+    """(system, person_block, user) template text from templates/context.md."""
+    t = context_sections()
+    return t["system"], t["person"], t["user"]
+
+
+def learned_block(learned_text):
+    """The learned-notes block as render_context inserts it ('' for no notes)."""
+    if not (learned_text or "").strip():
+        return ""
+    return _fill_once(context_sections()["learned"], {"learned_text": learned_text.strip()})
+
+
+def habits_block(habits_text):
+    """The "How my messages vary" block as render_context inserts it ('' for no habits text):
+    `habits_text` is habits.habits_text() for this draft's register."""
+    if not (habits_text or "").strip():
+        return ""
+    return _fill_once(context_sections()["habits"], {"habits_text": habits_text.strip()})
+
+
+def archive_phrase(register, first="", last="", complete=False):
+    """'a selection of my chat messages from 2024 to 2026' (the pilot: 'the complete archive of ...')."""
+    kinds = CONTEXT_WORDS.get(register, CONTEXT_WORDS["chat"])["kinds"]
+    head = ("the complete archive of my %s" if complete else "a selection of my %s") % kinds
+    if first and last and first != last:
+        return "%s from %s to %s" % (head, first, last)
+    return "%s from %s" % (head, first or last) if (first or last) else head
+
+
+def render_context(register, entries_text, task, person_text="", first="", last="", complete=False,
+                   learned_text="", habits_text=""):
+    """Fill templates/context.md. Returns (system_file_text, task_text). `entries_text` is the
+    rendered entries (pilot format, oldest first); `task` the new entry with an empty body;
+    `person_text` the person file tier, or "" for none (the person block is then left out);
+    `learned_text` the learned.md notes for this draft (`learned_for`), or "" for none (the notes
+    block, after the archive, is then left out); `habits_text` the measured habits of the register
+    (habits.habits_text), or "" for none: the "How my messages vary" block after the notes."""
+    system, person_block, user = context_template()
+    w = dict(CONTEXT_WORDS.get(register, CONTEXT_WORDS["chat"]))
+    w["archive"] = archive_phrase(register, first, last, complete)
+    person = ""
+    if (person_text or "").strip():
+        person = _fill_once(person_block, {"person_text": person_text.strip()}) + "\n\n"
+    learned = learned_block(learned_text)
+    learned = "\n\n" + learned if learned else ""
+    habits = habits_block(habits_text)
+    habits = "\n\n" + habits if habits else ""
+    sys_text = _fill_once(system, dict(w, person=person, entries=(entries_text or "").strip(), learned=learned,
+                                       habits=habits))
+    return sys_text + "\n", _fill_once(user, dict(w, task=(task or "").rstrip())).strip()
 
 
 def render_task(context, notes, recipient="", register="chat", subject=""):
@@ -48,14 +143,6 @@ def render_task(context, notes, recipient="", register="chat", subject=""):
         parts.append("Context:\n<<<\n%s\n>>>" % ctx)
     parts.append("What I want to say:\n%s" % (notes or "").strip())
     return "\n\n".join(parts)
-
-
-def length_target(stats, register):
-    F = ((stats.get("registers") or {}).get(register) or {}).get("features") or {}
-    if not F.get("len_median"):
-        return "short"
-    return "about %d words; usually %d-%d, rarely over %d" % (
-        round(F["len_median"]), round(F.get("len_p25", 0)), round(F.get("len_p75", 0)), round(F.get("len_p90", 0)))
 
 
 NOTE_HEAD = re.compile(r"^##\s+(?:\d{4}-\d{2}-\d{2}\s+)?([\w-]+)(?:\s+\(to (.*)\))?\s*$")
@@ -87,71 +174,16 @@ def learned_for(learned_text, register, recipient=""):
     return "\n\n".join(b for b in out if "\n" in b)  # skip headings with no note lines
 
 
-def build_kit(bank, stats, rules_text, learned_text, register, notes, context="", recipient="",
-              subject="", k=3, n_critic=5, exclude_ids=(), heldout=None):
-    """Assemble everything for one draft. Returns a dict with the rendered draft prompt
-    (system + user), the critic reference messages and metadata."""
-    reg_info = (stats.get("registers") or {}).get(register) or {}
-    fixed_ids = reg_info.get("fixed_ids") or []
-    query = "%s %s %s" % (context or "", notes or "", subject or "")
-    R = retrieve(bank, register, query, recipient=recipient, k=k, n_critic=n_critic,
-                 fixed_ids=fixed_ids, exclude_ids=exclude_ids, heldout=heldout)
-    examples = R["fixed"] + R["retrieved"]
-    supplement = []
-    regs = stats.get("registers") or {}
-    pref = SUPPLEMENT_FROM.get(register)
-    if (pref and register != pref and reg_info.get("n", 0) < SUPPLEMENT_PROSE_MIN
-            and regs.get(pref, {}).get("n", 0) >= SUPPLEMENT_PROSE_MIN):
-        S = retrieve(bank, pref, query, k=3, n_critic=0, fixed_ids=(regs[pref].get("fixed_ids") or [])[:3],
-                     exclude_ids=exclude_ids, heldout=heldout)
-        supplement = (S["fixed"] + S["retrieved"])[:4]
-    elif reg_info.get("n", 0) < SUPPLEMENT_MIN:
-        # thin register: borrow mechanics from the richest other register (prompt history last)
-        others = sorted(((r, d) for r, d in (stats.get("registers") or {}).items() if r != register),
-                        key=lambda rd: (rd[0] == "prompt", -rd[1].get("n", 0)))
-        if others:
-            o = others[0][0]
-            S = retrieve(bank, o, query, k=3, n_critic=0, fixed_ids=(stats["registers"][o].get("fixed_ids") or [])[:3],
-                         exclude_ids=exclude_ids, heldout=heldout)
-            supplement = (S["fixed"] + S["retrieved"])[:4]
-    kind, kinds, medium = KIND.get(register, KIND["chat"])
-    ex_text = format_examples(examples, register)
-    if supplement:
-        ex_text += "\n\n" + format_examples(supplement, register, start=len(examples) + 1)
-    n_ret = len(R["retrieved"])
-    same = ("from my earlier messages to this same person" if R["same_recipient"] else
-            "closest in situation; none to this person")
-    rules = rules_section(rules_text, register)
-    learned = learned_for(learned_text, register, recipient)
-    if learned:
-        rules += "\n\nLearned from my edits:\n" + learned
-    system, user = template("draft.md")
-    user = fill(user, kind=kind, kinds=kinds, medium=medium, examples=ex_text, n_retrieved=n_ret,
-                same_note=same, rules=rules or "(none yet)",
-                task=render_task(context, notes, recipient, register, subject),
-                length_target=length_target(stats, register))
-    if not n_ret:
-        user = re.sub(r"\nThe last 0 examples.*\n", "\n", user)
-    return {"register": register, "recipient": recipient, "system": system, "user": user,
-            "task": render_task(context, notes, recipient, register, subject),
-            "examples": [r["id"] for r in examples + supplement],
-            "critic": [{"id": r["id"], "text": r["text"], "context": r.get("context", "")} for r in R["critic"]],
-            "same_recipient": R["same_recipient"], "length_target": length_target(stats, register)}
-
-
-def critique_prompt(kit, draft, stats):
-    kind, kinds, medium = KIND.get(kit["register"], KIND["chat"])
-    refs = "\n\n".join("[%d] %s" % (i + 1, r["text"]) for i, r in enumerate(kit["critic"]))
-    F = ((stats.get("registers") or {}).get(kit["register"]) or {}).get("features") or {}
-    system, user = template("critique.md")
-    return system, fill(user, n=len(kit["critic"]), kind=kind, kinds=kinds, medium=medium,
-                        refs=refs or "(no reference messages available)", task=kit["task"], draft=draft.strip(),
-                        median=int(round(F.get("len_median", 0))) or "?",
-                        imperfection=F.get("imperfection_level", "unknown"))
-
-
-def revise_prompt(kit, draft, critique, lint_findings=()):
-    system, user = template("revise.md")
-    lint_txt = "\n".join("- %s" % f["message"] for f in lint_findings if f["level"] in ("fix", "consider"))
-    return system, fill(user, original_prompt=kit["user"], draft=draft.strip(), critique=critique.strip(),
-                        lint=lint_txt or "- nothing")
+def learned_notes(learned_text, register, recipient=""):
+    """learned_for() as the draft's context shows it: the note lines, without the `## <date> <register>`
+    headings `wlm learn note` writes (a hand-written heading keeps its text)."""
+    out = []
+    for line in learned_for(learned_text, register, recipient).splitlines():
+        if line.startswith("## "):
+            m = NOTE_HEAD.match(line)
+            if m and m.group(1).lower() in REGISTERS + ("all",):
+                continue
+            line = line[3:].strip()
+        if line.strip():
+            out.append(line)
+    return "\n".join(out).strip()

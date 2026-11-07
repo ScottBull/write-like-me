@@ -1,14 +1,19 @@
-"""Deterministic lint of a draft against the person's rules and measured stats.
+"""Deterministic lint of a draft against the person's hard rules.
 
-Three kinds of finding:
-  fix       a hard rule is broken, an AI-ism slipped in, or the draft is longer than ~all real ones
-  consider  caricature risk (habits stacked, or recent drafts overusing a habit) or too polished
-  info      context numbers for the reviser
+Two levels:
+  fix   a never/always rule in rules.md (its lint marker) is broken, or an avoid-list / preferred-
+        spelling phrase is used. Fix these with minimal edits; nothing else is rewritten.
+  info  for the person, not for a rewrite: the draft is longer than the middle half of real messages
+        (the line gives the word count against the register's median, and says so when it is longer
+        than ~all of them; the report's first line always gives the median), or recent
+        drafts overuse a habit compared with the real rate in stats.json (the caricature counter).
+Tendencies, habit density and polish are not checked: the archive in the draft's context carries
+them, and rewriting toward a measured average is what made the old drafts read as imitations.
 """
 import re
 
 from .rules import parse_rules
-from .stylo import (CLOSER_OFFERS, GREET, HEDGES, SIGNOFF_LINE, UNCONTRACTED, body_end, flourish_count, message_markers)
+from .stylo import CLOSER_OFFERS, GREET, HEDGES, SIGNOFF_LINE, UNCONTRACTED, message_markers
 from .textutil import RE_EMOJI, RE_EMOTICON, first_letter, normalise, sentences, words
 
 HABIT_LABEL = {
@@ -79,60 +84,16 @@ def lint(text, register, rules_text, stats, recent_drafts=()):
                     out.append(_finding("fix", "prefer", "You write \"%s\", not \"%s\"." % (best, o)))
 
     target = {}
-    if F and "length" in keys:
+    if F:
         target = {"median": F.get("len_median"), "p25": F.get("len_p25"), "p75": F.get("len_p75"),
                   "p90": F.get("len_p90")}
-        n = len(w)
-        if F.get("len_p90") and n > F["len_p90"] * 1.15 + 2:
-            out.append(_finding("fix", "length", "%d words; only 1 in 10 of your real messages is over %d. Cut."
-                                % (n, round(F["len_p90"]))))
-        elif F.get("len_p75") and n > F["len_p75"] + 2:
-            out.append(_finding("consider", "length", "%d words; longer than 3 in 4 of your real messages "
-                                "(median %d). Cut if the content allows." % (n, round(F.get("len_median", 0)))))
-
-    if F and "density" in keys:
-        fc = flourish_count(m)
-        p90 = max(1.0, F.get("flourishes_per_msg_p90", 1.0))
-        if fc > p90:
-            used = [k for k in ("ack_opener", "exclaim", "ellipsis", "spaced_hyphen", "spaced_slash",
-                                "parentheses", "emoji", "laugh", "dash") if m.get(k)]
-            out.append(_finding("consider", "density", "Stacks %d signature habits (%s); real messages rarely "
-                                "have more than %d. Drop the least natural one(s)." % (fc, ", ".join(used), p90)))
-
-    # caricature across recent drafts: habit rate in the last drafts vs the real rate
-    habits = [v for k, v in markers if k == "habit"]
-    recent = [d for d in recent_drafts if d.get("register") == register][-20:]
-    if F and len(recent) >= 5:
-        for h in habits:
-            real = F.get("share_msgs_" + h)
-            if real is None:
-                continue
-            drafted = sum(1 for d in recent if message_markers(d.get("text", "")).get(h)) / float(len(recent))
-            if m.get(h) and drafted > real * 1.6 + 0.1:
-                out.append(_finding("consider", "overuse:" + h, "Your last %d drafts used %s %d%% of the time vs "
-                                    "%d%% in your real messages. Skip it this time."
-                                    % (len(recent), HABIT_LABEL.get(h, h), round(drafted * 100), round(real * 100))))
-
-    # capitalisation and phrase frequency vs measured rates (catches a drafter or reviser that
-    # lowercases everything or leans on one hedge, which per-message habit flags don't see)
-    if F:
-        out += _rate_checks(t, F, register, recent)
-
-    if F and "polish" in keys and F.get("imperfection_level") in ("medium", "high"):
-        tidy = []
-        e = body_end(t)
-        if F.get("share_end_none", 0) >= 0.3 and e and not e[-1].isalnum():
-            tidy.append("final punctuation (you skip it in %d%% of messages)" % round(F["share_end_none"] * 100))
-        ss = sentences(t)
-        if len(ss) >= 3 and F.get("sentence_len_cv", 0) > 0.5:
-            lens = [len(words(s)) for s in ss]
-            mean = sum(lens) / float(len(lens))
-            var = sum((x - mean) ** 2 for x in lens) / len(lens)
-            if mean and (var ** 0.5) / mean < 0.25:
-                tidy.append("evenly sized sentences (yours vary a lot)")
-        if tidy:
-            out.append(_finding("consider", "polish", "Tidier than you usually are: " + "; ".join(tidy)
-                                + ". Permitted, not required; don't add mistakes on purpose."))
+        if F.get("len_median") and F.get("len_p75") and len(w) > F["len_p75"]:
+            msg = "%d words against your median of %d; half of your real messages are %d-%d words" % (
+                len(w), round(F["len_median"]), round(F.get("len_p25") or 0), round(F["len_p75"]))
+            if F.get("len_p90") and len(w) > F["len_p90"] * 1.15 + 2:
+                msg += ", and only 1 in 10 is over %d" % round(F["len_p90"])
+            out.append(_finding("info", "length", msg + "."))
+        out += _overuse(t, m, F, register, recent_drafts)
     return {"findings": out, "words": len(w), "target": target}
 
 
@@ -142,24 +103,33 @@ def _lower_starts(text):
     return sum(1 for c in fl if c.islower()), len(fl)
 
 
-def _rate_checks(t, F, register, recent):
+def _overuse(t, m, F, register, recent_drafts):
+    """Caricature counter (info only): a habit this draft uses that the last drafts in this register
+    use far more often than the person's real messages do. Rates come from stats.json."""
     out = []
+    recent = [d for d in recent_drafts if d.get("register") == register][-20:]
+    if len(recent) < 5:
+        return out
+    for h in HABIT_LABEL:
+        real = F.get("share_msgs_" + h)
+        if real is None or not m.get(h):
+            continue
+        drafted = sum(1 for d in recent if message_markers(d.get("text", "")).get(h)) / float(len(recent))
+        if drafted > real * 1.6 + 0.1:
+            out.append(_finding("info", "overuse:" + h, "Your last %d drafts used %s %d%% of the time vs "
+                                "%d%% in your real messages." % (len(recent), HABIT_LABEL[h], round(drafted * 100),
+                                                                 round(real * 100))))
     real_low = F.get("share_sentences_lowercase_start", 0.0)
     lo, n = _lower_starts(t)
     if lo and real_low < 0.5:
-        if lo >= 2 and lo / float(n) >= 0.5 and real_low < 0.15:
-            out.append(_finding("fix", "capitalisation", "%d of %d sentences start lowercase; only %d%% of yours do. "
-                                "Capitalise sentence starts as you normally would." % (lo, n, round(real_low * 100))))
-        elif len(recent) >= 5:
-            rl = rn = 0
-            for d in recent:
-                a, b = _lower_starts(d.get("text", ""))
-                rl, rn = rl + a, rn + b
-            rl, rn = rl + lo, rn + n
-            if rn and rl / float(rn) > real_low * 2 + 0.1:
-                out.append(_finding("consider", "overuse:lowercase_start", "Your recent drafts start %d%% of sentences "
-                                    "lowercase vs %d%% in your real messages. Capitalise this one."
-                                    % (round(100.0 * rl / rn), round(real_low * 100))))
+        rl, rn = lo, n
+        for d in recent:
+            a, b = _lower_starts(d.get("text", ""))
+            rl, rn = rl + a, rn + b
+        if rn and rl / float(rn) > real_low * 2 + 0.1:
+            out.append(_finding("info", "overuse:lowercase_start", "Your recent drafts start %d%% of sentences "
+                                "lowercase vs %d%% in your real messages." % (round(100.0 * rl / rn),
+                                                                               round(real_low * 100))))
     per_msg = F.get("len_mean", 0) / 1000.0
     low = t.lower()
     for ph, pat in HEDGES.items():
@@ -167,22 +137,19 @@ def _rate_checks(t, F, register, recent):
         if not c:
             continue
         real = (F.get("hedges") or {}).get(ph, 0.0) * per_msg   # expected uses per message
-        if c >= 2 and real < 0.3:
-            out.append(_finding("consider", "phrase:" + ph, "\"%s\" %d times in one message; you use it about "
-                                "%.2f times per message." % (ph, c, real)))
-        elif len(recent) >= 5:
-            used = sum(len(re.findall(pat, normalise(d.get("text", "")).lower())) for d in recent) + c
-            rate = used / float(len(recent) + 1)
-            if rate > real * 2 + 0.1:
-                out.append(_finding("consider", "overuse:" + ph, "Your recent drafts use \"%s\" %.2f times per "
-                                    "message vs %.2f in your real messages. Drop it here." % (ph, rate, real)))
+        used = sum(len(re.findall(pat, normalise(d.get("text", "")).lower())) for d in recent) + c
+        rate = used / float(len(recent) + 1)
+        if rate > real * 2 + 0.1:
+            out.append(_finding("info", "overuse:" + ph, "Your recent drafts use \"%s\" %.2f times per "
+                                "message vs %.2f in your real messages." % (ph, rate, real)))
     return out
 
 
 def format_report(res):
-    if not res["findings"]:
-        return "lint: clean (%d words)" % res["words"]
-    L = ["lint: %d finding(s), %d words" % (len(res["findings"]), res["words"])]
-    for f in res["findings"]:
+    fixes = [f for f in res["findings"] if f["level"] == "fix"]
+    med = (res.get("target") or {}).get("median")
+    vs = " (your median %d)" % round(med) if med else ""
+    L = ["lint: %s, %d words%s" % ("%d to fix" % len(fixes) if fixes else "clean", res["words"], vs)]
+    for f in fixes + [f for f in res["findings"] if f["level"] != "fix"]:
         L.append("  [%s] %s: %s" % (f["level"], f["code"], f["message"]))
     return "\n".join(L)

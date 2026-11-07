@@ -8,30 +8,30 @@ Commands (all data stays in the voice pack: $WRITE_LIKE_ME_PACK or ~/.claude/voi
   extract <source> [...]           claude_code | teams | outlook | files PATH | imessage
   vendor-install teams [--yes]     install the optional Teams parser at pinned commits (dry run first)
   add-samples --register R --file F   pasted samples, separated by lines of ---
-  build                            clean + measure + write profile.md, rules.md, stats.json, bank
-  status                           what's in the pack (counts only)
-  kit --register R --notes ...     assemble the draft prompt (exemplars + rules) for one message
-  critique-prompt --kit D --draft-file F   render the critic's prompt for a subagent
-  critique --kit D --draft-file F  run the critic via `claude -p` (fallback when no subagent)
-  lint --register R --file F       deterministic checks against rules and measured habits
-  log-draft --kit D --file F       remember a final draft (caricature tracking, voice-learn)
+  build                            clean + measure + write archive/, profile.md, rules.md, stats.json
+  status                           what's in the pack (counts only), its format version and defaults
+  context --register R --notes ... select archive entries within the budget; write the draft's
+                                   system file and task file
+  draft --system-file F --task-file T   one draft via `claude -p` (fallback when no subagent)
+  lint --register R --file F       deterministic checks against the hard rules
+  log-draft --register R --file F  remember a final draft (caricature tracking, voice-learn)
   learn diff|add|note|rule         learn from what you actually sent
-  check prepare|generate|page|score   blind test + scoring
+  person build|show|add|forget     the person file (what you know and think, cited)
+  check prepare|generate|page|score   blind test (pairs + lineups) and scoring
 """
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I drops the script dir
 
 from wlmlib import build as B  # noqa: E402
-from wlmlib import check as CK  # noqa: E402
-from wlmlib import compose, learn, lint as LN, llm  # noqa: E402
-from wlmlib.common import (REGISTERS, append_jsonl, ensure_pack, now_iso, pack_dir, private_open, read_json, read_jsonl,  # noqa: E402
-                           short_hash, write_json, write_jsonl)
+from wlmlib import check, cli_context, cli_person  # noqa: E402
+from wlmlib import learn, lint as LN  # noqa: E402
+from wlmlib.common import (REGISTERS, append_jsonl, ensure_pack, now_iso, pack_dir, private_open, read_json,  # noqa: E402
+                           read_jsonl, short_hash, write_jsonl)
 from wlmlib.discover import discover  # noqa: E402
 
 
@@ -167,75 +167,31 @@ def cmd_status(a):
     print("sources: %s; drafts logged: %d; pack: %s" % (", ".join(srcs), drafts, pack))
 
 
-def _new_work_dir(pack):
-    base = os.path.join(pack, "work")
-    os.makedirs(base, mode=0o700, exist_ok=True)
-    old = sorted(os.listdir(base))
-    for d in old[:-30]:
-        shutil.rmtree(os.path.join(base, d), ignore_errors=True)
-    d = os.path.join(base, now_iso().replace(":", "") + "-" + short_hash(os.getpid(), now_iso(), n=4))
-    os.makedirs(d, mode=0o700)
-    return d
+def cmd_draft(a):
+    from wlmlib import draft
+    _need_pack()
+    task = _read(a.task_file, None)
+    if not task.strip():
+        sys.exit("the task file is empty")
+    try:
+        print(draft.draft(a.system_file, task, model=a.model))
+    except RuntimeError as e:
+        sys.exit("draft failed: %s" % e)
 
 
-def cmd_kit(a):
-    pack = _need_pack()
-    stats, bank, rules = B.load_pack(pack)
-    learned = _read(os.path.join(pack, "learned.md"), None) if os.path.exists(os.path.join(pack, "learned.md")) else ""
-    reg = a.register
-    have = list((stats.get("registers") or {}).keys())
-    if reg not in have:
-        order = {"chat": ["email", "post", "doc", "prompt"], "email": ["chat", "post", "doc", "prompt"],
-                 "doc": ["post", "email", "chat", "prompt"], "prompt": ["chat", "email", "post", "doc"],
-                 "post": ["doc", "chat", "email", "prompt"]}[reg]
-        alt = next((r for r in order if r in have), None)
-        if not alt:
-            sys.exit("the pack has no samples at all; run voice-setup")
-        print("note: no %s samples in the pack; using %s samples instead (say so to the user)" % (reg, alt))
-        reg = alt
-    kit = compose.build_kit(bank, stats, rules, learned, reg, _read(a.notes_file, a.notes),
-                            context=_read(a.context_file, a.context), recipient=a.recipient or "",
-                            subject=a.subject or "", k=a.k)
-    d = _new_work_dir(pack)
-    write_json(os.path.join(d, "kit.json"), kit)
-    with private_open(os.path.join(d, "draft_prompt.md")) as f:
-        f.write("SYSTEM:\n%s\n\nUSER:\n%s\n" % (kit["system"], kit["user"]))
-    print("kit: %s" % d)
-    print("exemplars: %d (same recipient: %d); critic refs: %d; length target: %s"
-          % (len(kit["examples"]), kit["same_recipient"], len(kit["critic"]), kit["length_target"]))
-    print("----- draft prompt -----")
-    print(kit["user"])
-
-
-def _kit(d):
-    k = read_json(os.path.join(d, "kit.json"))
-    if not k:
-        sys.exit("no kit.json in %s" % d)
-    return k
-
-
-def cmd_critique_prompt(a):
-    pack = _need_pack()
-    stats, _, _ = B.load_pack(pack)
-    kit = _kit(a.kit)
-    s, u = compose.critique_prompt(kit, _read(a.draft_file, a.draft), stats)
-    p = os.path.join(a.kit, "critique_prompt.md")
-    with private_open(p) as f:
-        f.write("%s\n\n%s\n" % (s, u))
-    print(p)
-
-
-def cmd_critique(a):
-    pack = _need_pack()
-    stats, _, _ = B.load_pack(pack)
-    kit = _kit(a.kit)
-    s, u = compose.critique_prompt(kit, _read(a.draft_file, a.draft), stats)
-    print(llm.call(s, u, model=a.model))
+def _private_if_in_pack(pack, path):
+    """A draft file the model saved inside the pack (the Write tool uses default modes): make it 0600."""
+    if path and os.path.abspath(os.path.expanduser(path)).startswith(os.path.abspath(pack) + os.sep):
+        try:
+            os.chmod(os.path.expanduser(path), 0o600)
+        except OSError:
+            pass
 
 
 def cmd_lint(a):
     pack = _need_pack()
     stats, _, rules = B.load_pack(pack)
+    _private_if_in_pack(pack, a.file)
     text = _read(a.file, a.text)
     recent = read_jsonl(os.path.join(pack, "drafts.jsonl"))
     res = LN.lint(text, a.register, rules, stats, recent)
@@ -244,13 +200,23 @@ def cmd_lint(a):
 
 def cmd_log_draft(a):
     pack = _need_pack()
-    kit = _kit(a.kit) if a.kit else {"register": a.register, "recipient": a.recipient or ""}
+    ctx = {}
+    if a.context_dir:
+        ctx = read_json(os.path.join(a.context_dir, "context.json"))
+        if not ctx:
+            sys.exit("no context.json in %s" % a.context_dir)
+    register = a.register or ctx.get("register")
+    if not register:
+        sys.exit("give --register (or --context-dir)")
+    _private_if_in_pack(pack, a.file)
     text = _read(a.file, a.text).strip()
-    row = {"at": now_iso(), "register": kit["register"] if a.kit else a.register, "recipient": kit.get("recipient", ""),
-           "text": text, "kit": a.kit or ""}
+    if not text:
+        sys.exit("nothing to log")
+    row = {"at": now_iso(), "register": register, "recipient": a.recipient or ctx.get("recipient", ""),
+           "text": text, "context_dir": a.context_dir or ""}
     append_jsonl(os.path.join(pack, "drafts.jsonl"), row)
-    if a.kit:
-        with private_open(os.path.join(a.kit, "final.txt")) as f:
+    if a.context_dir:
+        with private_open(os.path.join(a.context_dir, "final.txt")) as f:
             f.write(text + "\n")
     print("logged")
 
@@ -296,62 +262,6 @@ def cmd_learn(a):
         print("added %d rule(s) to rules.md (kept across rebuilds)" % len(a.text or []))
 
 
-def cmd_check(a):
-    pack = _need_pack()
-    stats, bank, rules = B.load_pack(pack)
-    learned = _read(os.path.join(pack, "learned.md"), None) if os.path.exists(os.path.join(pack, "learned.md")) else ""
-    if a.action == "prepare":
-        items = CK.select_items(bank, stats, a.register, n=a.n)
-        if len(items) < 4:
-            sys.exit("only %d usable %s messages; need more samples for a meaningful test" % (len(items), a.register))
-        run = os.path.join(pack, "check", now_iso()[:19].replace(":", "") + "-" + a.register)
-        os.makedirs(run, mode=0o700, exist_ok=True)
-        write_jsonl(os.path.join(run, "items.jsonl"), items)
-        demo = a.demo or any(i.get("source") == "synthetic" for i in items)
-        label = ("synthetic fixture data, not anyone's real messages" if demo
-                 else "your real messages from the voice pack at %s" % pack)
-        write_json(os.path.join(run, "meta.json"), {"register": a.register, "created": now_iso(), "n": len(items),
-                                                    "demo": demo, "label": label})
-        print(json.dumps({"run": run, "items": len(items), "data": ("DEMO: " if demo else "REAL: ") + label,
-                          "model_calls_estimate": len(items) * 5 + (len(items) * 4 + 5) // 6}))
-        return
-    run = a.run or _latest_run(pack)
-    if a.action == "generate":
-        if not llm.available():
-            sys.exit("the claude CLI is not on PATH")
-        rows = CK.generate(run, bank, stats, rules, learned, model=a.model, workers=a.workers,
-                           log=lambda s: print(s, file=sys.stderr))
-        print(json.dumps({"run": run, "generations": len(rows)}))
-    elif a.action == "page":
-        out, n = CK.build_page(run, conditions=("voice", "plain") if a.include_plain else ("voice",))
-        print(json.dumps({"page": out, "pairs": n}))
-        if a.open:
-            if sys.platform == "darwin":
-                subprocess.run(["open", out])
-            else:
-                import webbrowser
-                if not webbrowser.open("file://" + os.path.abspath(out)):
-                    print("could not open a browser; open this file manually: %s" % out)
-    elif a.action == "score":
-        if a.picks:
-            picks = read_json(os.path.expanduser(a.picks))
-            try:
-                CK.score_picks(picks, run)  # validate before copying and before any judge calls
-            except CK.PicksMismatch as e:
-                sys.exit("picks not used: %s" % e)
-            shutil.copy(os.path.expanduser(a.picks), os.path.join(run, "picks.json"))
-        res = CK.score(run, bank, stats, model=a.model, judge=not a.no_judge, log=lambda s: print(s, file=sys.stderr))
-        print(CK.format_scores(res))
-
-
-def _latest_run(pack):
-    base = os.path.join(pack, "check")
-    runs = sorted(os.listdir(base)) if os.path.isdir(base) else []
-    if not runs:
-        sys.exit("no check runs yet; run `check prepare` first")
-    return os.path.join(base, runs[-1])
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="wlm.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -384,29 +294,19 @@ def main(argv=None):
     p.add_argument("--recipient")
     p.set_defaults(fn=cmd_add_samples)
 
-    p = sp.add_parser("build")
-    p.add_argument("--no-mask", action="store_true", help="keep email addresses / phone numbers in the bank")
+    p = sp.add_parser("build", help="clean + measure the sources and write archive/, stats.json, rules.md, "
+                                    "profile.md (upgrades a v1 pack)")
+    p.add_argument("--no-mask", action="store_true", help="keep email addresses / phone numbers in archive/")
     p.set_defaults(fn=cmd_build)
-    sp.add_parser("status").set_defaults(fn=cmd_status)
+    sp.add_parser("status", help="what's in the pack (counts only), format version, defaults").set_defaults(fn=cmd_status)
 
-    p = sp.add_parser("kit")
-    p.add_argument("--register", required=True, choices=REGISTERS)
-    p.add_argument("--notes")
-    p.add_argument("--notes-file")
-    p.add_argument("--context")
-    p.add_argument("--context-file")
-    p.add_argument("--recipient")
-    p.add_argument("--subject")
-    p.add_argument("--k", type=int, default=3)
-    p.set_defaults(fn=cmd_kit)
+    cli_context.add_parser(sp)
 
-    for name, fn in (("critique-prompt", cmd_critique_prompt), ("critique", cmd_critique)):
-        p = sp.add_parser(name)
-        p.add_argument("--kit", required=True)
-        p.add_argument("--draft-file")
-        p.add_argument("--draft")
-        p.add_argument("--model")
-        p.set_defaults(fn=fn)
+    p = sp.add_parser("draft", help="one draft via claude -p: the system file as the system prompt, the task on stdin")
+    p.add_argument("--system-file", required=True, help="system.txt from `wlm context`")
+    p.add_argument("--task-file", required=True, help="task.txt from `wlm context`")
+    p.add_argument("--model", help="model (default: $WRITE_LIKE_ME_MODEL, else your default)")
+    p.set_defaults(fn=cmd_draft)
 
     p = sp.add_parser("lint")
     p.add_argument("--register", required=True, choices=REGISTERS)
@@ -416,7 +316,7 @@ def main(argv=None):
     p.set_defaults(fn=cmd_lint)
 
     p = sp.add_parser("log-draft")
-    p.add_argument("--kit")
+    p.add_argument("--context-dir", help="the `wlm context` directory (register and recipient from its context.json)")
     p.add_argument("--register", choices=REGISTERS)
     p.add_argument("--recipient")
     p.add_argument("--file")
@@ -437,20 +337,8 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_learn)
 
-    p = sp.add_parser("check")
-    p.add_argument("action", choices=["prepare", "generate", "page", "score"])
-    p.add_argument("--register", default="chat", choices=REGISTERS)
-    p.add_argument("--n", type=int, default=12)
-    p.add_argument("--run")
-    p.add_argument("--model")
-    p.add_argument("--workers", type=int, default=4)
-    p.add_argument("--include-plain", action="store_true", help="also test plain-Claude pairs on the page")
-    p.add_argument("--open", action="store_true")
-    p.add_argument("--no-judge", action="store_true")
-    p.add_argument("--picks", help="exported picks JSON from the blind-test page")
-    p.add_argument("--demo", action="store_true",
-                   help="label the run as a demo (automatic when the items are synthetic fixtures)")
-    p.set_defaults(fn=cmd_check)
+    cli_person.add_parser(sp)
+    check.add_parser(sp)
 
     a = ap.parse_args(argv)
     old_umask = os.umask(0o077)  # everything the CLI creates is owner-only (files 0600, dirs 0700)

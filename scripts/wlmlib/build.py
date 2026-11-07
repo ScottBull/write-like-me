@@ -1,22 +1,47 @@
-"""Build the voice pack from extracted sources.
+"""Build the voice pack (format v2) from extracted sources.
 
 pack/
-  sources/<source>.jsonl  raw extracted records (local only)
-  exemplars.jsonl         cleaned, de-duplicated bank (what retrieval reads)
-  stats.json              per-register stylometric profile + fixed exemplar ids
-  rules.md                frequency-calibrated rules (editable; KEEP BELOW section survives rebuilds)
-  profile.md              human-readable summary
-  learned.md              notes from voice-learn (never overwritten)
+  sources/<source>.jsonl    raw extracted records (local only; the ground truth)
+  archive/<register>.jsonl  cleaned, masked, de-duplicated messages in date order (archive.py)
+  stats.json                pack_version, per-register stylometric profile, archive sizes, defaults
+  rules.md                  hard rules only (editable; KEEP BELOW section survives rebuilds)
+  profile.md                human-readable summary, including the habit tendencies
+  learned.md                notes from voice-learn (never overwritten)
+  drafts.jsonl              drafts logged by write-as-me (never touched by build)
+
+Upgrading: a v1 pack (no pack_version in stats.json; exemplars.jsonl and fixed_ids) is rebuilt in
+place from sources/: archive/ is written, exemplars.jsonl deleted, rules.md regenerated with its
+KEEP section, learned.md and drafts.jsonl left alone.
 """
 import os
 import re
 from collections import Counter
 
 from . import __version__
-from .common import REGISTERS, now_iso, private_open, read_json, read_jsonl, secure_tree, write_json, write_jsonl
-from .rules import build_profile_md, build_rules_md, choose_fixed, split_keep
+from .archive import has_archive, load_archive, write_archive
+from .common import (PACK_VERSION, REGISTERS, now_iso, pack_version, private_open, read_json, read_jsonl,
+                     secure_tree, write_json)
+from .rules import build_profile_md, build_rules_md, caricature_habits, spelling_prefs, split_keep
 from .stylo import features
 from .textutil import mask_pii, mask_recipient, normalise, word_count
+
+# The draft defaults: the one place they are set. `build` writes them into stats.json as
+# `budget_default` / `strategy_default`, and everything else (`wlm context`, voice-check) reads
+# stats.json, falling back to these only for a pack built before they existed (`defaults()`).
+# Provisional, from the context-budget ablation so far (compact strategy C at 10k tokens was the best
+# cell); the final values come from its write-up.
+BUDGET_DEFAULT = 10000     # tokens of archive + person file + learned notes + habits block per draft
+STRATEGY_DEFAULT = "C"     # selection strategy (select.py)
+PERSON_DEFAULT = "none"    # person file tier sent by default; the ablation found it hurt at every budget
+# The "How my messages vary" block (habits.py) after the archive: `on` or `off`. Like PERSON_DEFAULT it
+# is not written into stats.json; a pack overrides it with `habits_default` there. Off, from the final
+# head-to-head (reviews/rebuild-results.md in the research workspace): with the block on, Teams drafts
+# were spotted more often in the lineup and were easier for LUAR to tell apart, and they still never
+# dropped a final period; on Reddit it lowered every bundle score.
+HABITS_DEFAULT = "off"
+HABITS_CHOICES = ("on", "off")
+
+V1_FILES = ("exemplars.jsonl", "exemplars.jsonl.tmp")   # derived files a v2 pack no longer has
 
 # Records with any of these flags are kept in sources/ but left out of the bank and stats:
 # they are probably not the person's own prose.
@@ -91,11 +116,71 @@ def load_sources(pack):
     return recs, per_source
 
 
-def build(pack, mask=True, k_fixed=6):
+def defaults(stats):
+    """(budget, strategy) for a draft from a pack's stats.json, else the constants above."""
+    s = stats or {}
+    return int(s.get("budget_default") or BUDGET_DEFAULT), str(s.get("strategy_default") or STRATEGY_DEFAULT).upper()
+
+
+def habits_default(stats, given=None):
+    """'on' or 'off': `given` (a --habits flag) if set, else stats.json `habits_default`, else
+    HABITS_DEFAULT. A value that is not on/off raises ValueError."""
+    v = given
+    if v is None or v == "":
+        v = (stats or {}).get("habits_default")
+    if v is None or v == "":
+        v = HABITS_DEFAULT
+    v = ("on" if v else "off") if isinstance(v, bool) else str(v).strip().lower()
+    if v not in HABITS_CHOICES:
+        raise ValueError("habits must be on or off, not %r (check habits_default in stats.json)" % v)
+    return v
+
+
+def _carry_defaults(old_stats, budget_default=None, strategy_default=None):
+    """The defaults a rebuild writes, and which of them came from the constants (`defaults_auto`).
+
+    A value passed in, or one in the old stats.json that differs from what the build last wrote by
+    itself (the user edited it), is the user's and is kept. A value the build wrote from the
+    constants follows the constants, so a plugin update that changes them reaches the pack on the
+    next build."""
+    auto_old = old_stats.get("defaults_auto") or {}
+    out, auto = {}, {}
+    for key, given, const in (("budget_default", budget_default, BUDGET_DEFAULT),
+                              ("strategy_default", strategy_default, STRATEGY_DEFAULT)):
+        old = old_stats.get(key)
+        if given:
+            out[key] = given
+        elif old and (key not in auto_old or old != auto_old[key]) and not _pre_auto(old_stats, key, old):
+            out[key] = old
+        else:
+            out[key] = auto[key] = const
+    out["budget_default"] = int(out["budget_default"])
+    out["strategy_default"] = str(out["strategy_default"]).upper()
+    return out, auto
+
+
+# What 0.2.0 development builds wrote before `defaults_auto` existed: treated as written by the build.
+_PRE_AUTO = {"budget_default": 50000, "strategy_default": "D"}
+
+
+def _pre_auto(old_stats, key, value):
+    return "defaults_auto" not in old_stats and _PRE_AUTO.get(key) == value
+
+
+def build(pack, mask=True, budget_default=None, strategy_default=None):
+    """Clean + measure + write archive/, stats.json, rules.md, profile.md (and learned.md if missing).
+    Upgrades a v1 pack. Budget and strategy defaults the user set (passed here, or edited into
+    stats.json) are kept; the ones the build set itself follow BUDGET_DEFAULT / STRATEGY_DEFAULT."""
+    old_stats = read_json(os.path.join(pack, "stats.json"), {}) or {}
+    old_version = pack_version(old_stats)
     recs, per_source = load_sources(pack)
     bank, dropped = clean_bank(recs, mask=mask)
     bank.sort(key=lambda r: (r["register"], r.get("timestamp") or "", r["id"]))
-    write_jsonl(os.path.join(pack, "exemplars.jsonl"), bank)
+    archive = write_archive(pack, bank)
+    for f in V1_FILES:
+        fp = os.path.join(pack, f)
+        if os.path.exists(fp):
+            os.remove(fp)
     built = now_iso()
     regs = {}
     all_feats = {}
@@ -110,11 +195,17 @@ def build(pack, mask=True, k_fixed=6):
             "sources": dict(Counter(r["source"] for r in rr)),
             "recipients": len({r.get("recipient") for r in rr if r.get("recipient")}),
             "features": F,
-            "fixed_ids": choose_fixed(rr, k=k_fixed, max_words=max(8, F.get("len_p90", 40) * 1.15),
-                                      mean_words=F.get("len_mean")),
+            "caricature_habits": caricature_habits(F),
+            "spelling_prefs": spelling_prefs(F),
         }
-    stats = {"built": built, "version": __version__, "masked_pii": mask, "registers": regs,
+    stats = {"pack_version": PACK_VERSION, "built": built, "version": __version__, "masked_pii": mask,
+             "registers": regs, "archive": archive,
              "dropped": dict(dropped), "sources": dict(per_source)}
+    dflt, auto = _carry_defaults(old_stats, budget_default, strategy_default)
+    stats.update(dflt)
+    stats["defaults_auto"] = auto
+    if old_version is not None and old_version < PACK_VERSION:
+        stats["upgraded_from"] = old_version
     write_json(os.path.join(pack, "stats.json"), stats)
 
     rules_p = os.path.join(pack, "rules.md")
@@ -128,7 +219,7 @@ def build(pack, mask=True, k_fixed=6):
     with private_open(rules_p) as f:
         f.write(build_rules_md(all_feats, built, keep))
     with private_open(os.path.join(pack, "profile.md")) as f:
-        f.write(build_profile_md(all_feats, dict(Counter(r["source"] for r in bank)), built))
+        f.write(build_profile_md(all_feats, dict(Counter(r["source"] for r in bank)), built, archive))
     lp = os.path.join(pack, "learned.md")
     if not os.path.exists(lp):
         with private_open(lp) as f:
@@ -137,22 +228,47 @@ def build(pack, mask=True, k_fixed=6):
     return stats
 
 
+def needs_upgrade(stats):
+    v = pack_version(stats)
+    return v is not None and v < PACK_VERSION
+
+
 def summary(stats):
     """Counts only (no text), safe to show in the terminal."""
-    L = ["built %s" % stats.get("built")]
+    v = pack_version(stats)
+    L = ["built %s; pack format v%s" % (stats.get("built"), v)]
+    if needs_upgrade(stats):
+        L.append("  this pack uses an old format: run `wlm build` to upgrade (sources/ are kept, nothing is lost)")
+    elif stats.get("upgraded_from"):
+        L.append("  upgraded from pack format v%s" % stats["upgraded_from"])
+    arch = stats.get("archive") or {}
     for reg, d in stats.get("registers", {}).items():
         F = d["features"]
-        L.append("  %-6s %5d messages from %s; median %s words; imperfection %s; %d fixed exemplars"
+        a = arch.get(reg)
+        tail = ("; archive %d entries, ~%d tokens" % (a["entries"], a["tokens"])) if a else ""
+        L.append("  %-6s %5d messages from %s; median %s words; imperfection %s%s"
                  % (reg, d["n"], ", ".join("%s=%d" % kv for kv in d["sources"].items()),
-                    int(round(F.get("len_median", 0))), F.get("imperfection_level"), len(d["fixed_ids"])))
+                    int(round(F.get("len_median", 0))), F.get("imperfection_level"), tail))
+    if v and v >= 2:
+        try:
+            h = habits_default(stats)
+        except ValueError:
+            h = "invalid (%r)" % stats.get("habits_default")
+        L.append("  defaults: budget %s tokens, strategy %s, habits block %s"
+                 % (stats.get("budget_default"), stats.get("strategy_default"), h))
     if stats.get("dropped"):
         L.append("  dropped: " + ", ".join("%s=%d" % kv for kv in sorted(stats["dropped"].items())))
     return "\n".join(L)
 
 
 def load_pack(pack):
+    """(stats, bank, rules text). The bank is the archive (all registers); a v1 pack not yet rebuilt
+    falls back to its exemplars.jsonl."""
     stats = read_json(os.path.join(pack, "stats.json"), {}) or {}
-    bank = read_jsonl(os.path.join(pack, "exemplars.jsonl"))
+    if has_archive(pack):
+        bank = load_archive(pack)
+    else:
+        bank = read_jsonl(os.path.join(pack, "exemplars.jsonl"))
     rules = ""
     rp = os.path.join(pack, "rules.md")
     if os.path.exists(rp):

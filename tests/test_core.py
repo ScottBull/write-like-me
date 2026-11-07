@@ -16,7 +16,8 @@ ROOT = os.path.dirname(HERE)
 FIX = os.path.join(HERE, "fixtures")
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
-from wlmlib import build, check, clean, compose, learn, lint, retrieve, rules, stylo, textutil  # noqa: E402
+from wlmlib import build, check, clean, cli_context, compose, learn, lint, retrieve, rules, stylo, textutil  # noqa: E402
+from wlmlib import select as S  # noqa: E402
 from wlmlib.common import make_record, read_jsonl  # noqa: E402
 from wlmlib.sources import claude_code, files, imessage, paste, teams  # noqa: E402
 
@@ -142,41 +143,6 @@ class TestRules(unittest.TestCase):
         self.assertNotIn(("avoid", "synergy"), rules.parse_rules(md, "email"))
         self.assertNotIn("<!--", rules.rules_section(md, "chat"))
 
-    def test_choose_fixed_keeps_habit_frequency(self):
-        recs = chat_records()
-        ids = rules.choose_fixed(recs, k=6)
-        self.assertEqual(len(ids), 6)
-        by = {r["id"]: r for r in recs}
-        acks = sum(stylo.message_markers(by[i]["text"])["ack_opener"] for i in ids)
-        self.assertLessEqual(acks, 2)
-        self.assertGreaterEqual(len({by[i]["recipient"] for i in ids}), 3)
-
-    def test_choose_fixed_shows_habits_not_flat_or_link_messages(self):
-        # Synthetic: 30 flat habit-free messages, 30 with the person's hedges / acks / slashes,
-        # and link-only, attachment lead-in and group-chat messages that should never be picked.
-        recs = []
-        for i in range(30):
-            recs.append(make_record("s", "chat", "I sent the file to the vendor %d today." % i, rid="flat%d" % i,
-                                    recipient="P%d" % (i % 7), context="any news?"))
-            recs.append(make_record("s", "chat", ["Yea, probably fine to ship the v%d build / notes then" % i,
-                                                  "I think it's just the export step %d, maybe rerun it?" % i,
-                                                  "Pretty sure the deck %d is done (mostly) - will check" % i][i % 3],
-                                    rid="voice%d" % i, recipient="Q%d" % (i % 7), context="status?"))
-            recs.append(make_record("s", "chat", "Here's the link for the board %d: https://example.com/b%d" % (i, i),
-                                    rid="link%d" % i, recipient="R", context="link?"))
-            recs.append(make_record("s", "chat", "Here's the updated checklist for round %d:" % i, rid="lead%d" % i,
-                                    recipient="R", context="list?"))
-            r = make_record("s", "chat", "Probably fine, I think we can wait on batch %d" % i, rid="grp%d" % i,
-                            recipient="Team room", context="wait?")
-            r["chat_type"] = "group"
-            recs.append(r)
-        ids = rules.choose_fixed(recs, k=6)
-        self.assertEqual(len(ids), 6)
-        self.assertFalse([i for i in ids if i.startswith(("link", "lead", "grp"))], ids)
-        by = {r["id"]: r for r in recs}
-        hedged = sum(stylo.message_markers(by[i]["text"])["hedge"] for i in ids)
-        self.assertGreaterEqual(hedged, 2)   # the habits appear in the set, not only flat messages
-
     def test_possessive_not_contraction(self):
         F = stylo.features(["Sam's laptop and the team's deck are in Robin's office.", "It is done and that is it."])
         self.assertEqual(F["per100w_contractions"], 0)
@@ -186,26 +152,12 @@ class TestRules(unittest.TestCase):
 
 
 class TestRetrieve(unittest.TestCase):
-    def test_same_recipient_first(self):
-        R = retrieve.retrieve(chat_records(), "chat", "is the report ready for the client", recipient="Morgan", k=3)
-        self.assertEqual(R["same_recipient"], 3)
-        self.assertTrue(all("Morgan" in r["recipient"] for r in R["retrieved"]))
-        ids = {r["id"] for r in R["retrieved"]}
-        self.assertFalse(ids & {r["id"] for r in R["critic"]})
-
-    def test_leak_rule(self):
-        recs = chat_records()
-        held = recs[0]
-        R = retrieve.retrieve(recs, "chat", held["context"], recipient=held["recipient"], k=5, n_critic=30,
-                              heldout=held)
-        for r in R["retrieved"] + R["critic"]:
-            self.assertNotEqual(r["id"], held["id"])
-            self.assertFalse(retrieve.leaks(r, held))
-
-    def test_format_examples(self):
-        s = retrieve.format_examples(chat_records()[:2], "chat")
-        self.assertIn("They said:", s)
-        self.assertIn("I sent:", s)
+    def test_tfidf_ranks_the_matching_entry_first(self):
+        docs = [(r.get("context") or "") + " " + r["text"] for r in chat_records()]
+        vec, V = retrieve.tfidf_index(docs)
+        q = vec(docs[7])
+        self.assertEqual(max(range(len(V)), key=lambda i: retrieve.cosine(q, V[i])), 7)
+        self.assertEqual(retrieve.cosine(vec("zzqx"), V[0]), 0.0)
 
 
 class TestLint(TempPack):
@@ -220,21 +172,35 @@ class TestLint(TempPack):
         good = lint.lint("still on. bring the adapter", "chat", rtext, stats)
         self.assertEqual([f for f in good["findings"] if f["level"] == "fix"], [])
 
-    def test_rate_checks(self):
-        F = {"share_sentences_lowercase_start": 0.03, "len_mean": 20, "hedges": {"i think": 4.0}}
-        res = lint._rate_checks("two came. the third is late i think", F, "chat", [])
-        self.assertIn("capitalisation", {f["code"] for f in res})
+    def test_lint_is_hard_rules_only(self):
+        stats = build.build(self.pack)
+        _, _, rtext = build.load_pack(self.pack)
+        long_tidy = " ".join(["The build passed and the report is ready for review today."] * 12)
+        res = lint.lint(long_tidy, "chat", rtext, stats)
+        self.assertEqual({f["level"] for f in res["findings"]}, {"info"})
+        self.assertIn("length", {f["code"] for f in res["findings"]})
+        self.assertIn("lint: clean", lint.format_report(res))
+
+    def test_overuse_counter(self):
+        F = {"share_sentences_lowercase_start": 0.03, "len_mean": 20, "hedges": {"i think": 4.0},
+             "share_msgs_ack_opener": 0.1}
+        m = stylo.message_markers
+        self.assertEqual(lint._overuse("two came. the third is late i think", m("x"), F, "chat", []), [])
         recent = [{"register": "chat", "text": "Done, i think"} for _ in range(6)]
-        res = lint._rate_checks("Works for me i think", F, "chat", recent)
+        t = "Works for me i think"
+        res = lint._overuse(t, m(t), F, "chat", recent)
         self.assertIn("overuse:i think", {f["code"] for f in res})
-        self.assertEqual(lint._rate_checks("Works for me. Thanks", F, "chat", recent), [])
+        self.assertEqual({f["level"] for f in res}, {"info"})
+        t = "Works for me. Thanks"
+        self.assertEqual(lint._overuse(t, m(t), F, "chat", recent), [])
 
     def test_caricature_across_drafts(self):
         stats = build.build(self.pack)
         _, _, rtext = build.load_pack(self.pack)
         recent = [{"register": "chat", "text": "Yep, done"} for _ in range(8)]
         res = lint.lint("Yep, on it", "chat", rtext, stats, recent)
-        self.assertIn("overuse:ack_opener", {f["code"] for f in res["findings"]})
+        hit = [f for f in res["findings"] if f["code"] == "overuse:ack_opener"]
+        self.assertEqual([f["level"] for f in hit], ["info"])
 
 
 class TestLearn(unittest.TestCase):
@@ -333,48 +299,55 @@ class TestSources(unittest.TestCase):
 
 
 class TestBuildCompose(TempPack):
-    def test_build_and_kit(self):
+    def test_build_and_context(self):
         stats = build.build(self.pack)
-        for f in ("profile.md", "rules.md", "stats.json", "exemplars.jsonl", "learned.md"):
+        for f in ("profile.md", "rules.md", "stats.json", "learned.md", os.path.join("archive", "chat.jsonl")):
             self.assertTrue(os.path.exists(os.path.join(self.pack, f)), f)
+        self.assertFalse(os.path.exists(os.path.join(self.pack, "exemplars.jsonl")))
+        self.assertEqual(stats["pack_version"], 2)
         self.assertEqual(stats["registers"]["chat"]["n"], 40)
-        self.assertEqual(len(stats["registers"]["chat"]["fixed_ids"]), 6)
+        self.assertEqual(stats["archive"]["chat"]["entries"], 40)
+        self.assertEqual((stats["budget_default"], stats["strategy_default"]),
+                         (build.BUDGET_DEFAULT, build.STRATEGY_DEFAULT))
         s, bank, rtext = build.load_pack(self.pack)
-        kit = compose.build_kit(bank, s, rtext, "", "chat", "yes still on; bring the adapter",
-                                context="is the demo still on", recipient="Riley")
-        self.assertIn("<examples>", kit["user"])
-        self.assertIn("Never use em dashes", kit["user"])
-        self.assertNotIn("{", kit["user"].replace("{\"brief\"", ""))
-        self.assertEqual(len(kit["critic"]), 5)
-        cs, cu = compose.critique_prompt(kit, "draft text", s)
-        self.assertIn("draft text", cu)
-        rs, ru = compose.revise_prompt(kit, "draft text", "No clear tells.", [])
-        self.assertIn("No clear tells.", ru)
+        entries = [e for e in bank if e["register"] == "chat"]
+        budget, strategy = build.defaults(s)
+        picked = S.select(entries, budget, {"context": "is the demo still on"}, 0, strategy)
+        self.assertTrue(picked)
+        self.assertLessEqual(S.total_tokens(picked), budget)
+        system, task = S.assemble("", picked, "chat", {"notes": "yes still on; bring the adapter",
+                                                       "context": "is the demo still on", "recipient": "Riley"})
+        self.assertEqual(system.count("=== ARCHIVE ==="), 1)
+        self.assertEqual(system.count("### "), len(picked))
+        self.assertIn("What I want to say (my notes, not my wording): yes still on; bring the adapter", task)
+        self.assertNotIn("Never use em dashes", system)          # no style rules in the prompt any more
+        self.assertNotRegex(system + task, r"\{[a-z_]+\}")
+        self.assertFalse(hasattr(compose, "build_kit") or hasattr(compose, "critique_prompt")
+                         or hasattr(retrieve, "retrieve") or hasattr(retrieve, "format_examples"))
 
-    def test_post_register_and_prose_supplement(self):
-        topics = ["the inverter", "panel tilt", "battery sizing", "the charge controller", "grounding"]
+    def test_post_register_context(self):
+        topics = ["merino yarn", "bamboo needles", "a looser cast-on", "the cable pattern", "wet blocking"]
         recs = [make_record("reddit", "post", "I went with %s in the end. It was probably overkill for a "
-                            "small cabin, but it's been solid for %d months." % (topics[i % 5], i + 2),
-                            rid="post%d" % i, thread="t%d" % i, context="what did you end up using?")
+                            "first sweater, but it's held up for %d months." % (topics[i % 5], i + 2),
+                            rid="post%d" % i, thread="t%d" % i, context="what did you end up using?",
+                            recipient="r/knitting")
                 for i in range(45)]
-        recs += [make_record("x", "email", "Thursday works for the review, I'll bring the deck %d." % i,
-                             rid="mail%d" % i, recipient="Dana") for i in range(6)]
         with open(os.path.join(self.pack, "sources", "more.jsonl"), "w") as f:
             f.write("\n".join(json.dumps(r) for r in recs) + "\n")
         stats = build.build(self.pack)
         self.assertEqual(stats["registers"]["post"]["n"], 45)
-        s, bank, rtext = build.load_pack(self.pack)
-        kit = compose.build_kit(bank, s, rtext, "", "post", "used a bigger battery; would size up again",
-                                context="what battery did you go with?")
-        self.assertIn("Post or comment I'm replying to", kit["user"])
-        self.assertIn("They posted: what did you end up using?", kit["user"])
-        self.assertIn("I posted: ", kit["user"])
-        # a thin email register borrows public posts (the person's longer prose) ...
-        kit = compose.build_kit(bank, s, rtext, "", "email", "review moved to Friday", recipient="Dana")
-        self.assertIn("I posted (on a public forum): ", kit["user"])
-        # ... but chat, with plenty of its own samples, borrows nothing
-        kit = compose.build_kit(bank, s, rtext, "", "chat", "yes still on", context="is the demo still on")
-        self.assertNotIn("I posted", kit["user"])
+        info = cli_context.build_context(self.pack, "post", "used a thicker yarn; would size up again",
+                                         context="what yarn did you go with?", recipient="r/knitting")
+        self.assertEqual(info["archive_register"], "post")
+        with open(info["system"]) as f:
+            system = f.read()
+        with open(info["task"]) as f:
+            task = f.read()
+        self.assertIn("my posts and comments", system)
+        self.assertIn("### r/knitting, ", system)
+        self.assertIn("Replying to: what did you end up using?\nMy comment:\nI went with", system)
+        self.assertIn("Replying to: what yarn did you go with?", task)
+        self.assertTrue(task.rstrip().endswith("My comment:"))
 
     def test_rebuild_keeps_user_rules(self):
         build.build(self.pack)
@@ -391,7 +364,7 @@ class TestBuildCompose(TempPack):
                 make_record("x", "email", "Sending the deck now.", recipient="Robin Fake <robin@example.org>")]
         bank, _ = build.clean_bank(recs)
         self.assertEqual([r["recipient"] for r in bank], ["dana.lee (example)", "Robin Fake"])
-        self.assertNotIn("@", retrieve.format_examples(bank, "email"))
+        self.assertNotIn("@", "\n".join(S.render_entry(e, "email") for e in bank))
         self.assertTrue(retrieve.recipient_match(bank[0], "Dana"))
         keep, _ = build.clean_bank(recs, mask=False)
         self.assertEqual(keep[0]["recipient"], "dana.lee@example.com")
@@ -421,17 +394,14 @@ class TestBuildCompose(TempPack):
         learned = (build.LEARNED_HEADER + "\n## 2026-03-01 chat (to Dana)\n- shorter replies to Dana\n"
                    "\n## 2026-03-02 email\n- no exclamation marks in email\n"
                    "\n## 2026-03-03 all\n- write okay, not ok\n")
-        build.build(self.pack)
-        s, bank, rtext = build.load_pack(self.pack)
-        to_dana = compose.build_kit(bank, s, rtext, learned, "chat", "yes", recipient="Dana")["user"]
-        to_sam = compose.build_kit(bank, s, rtext, learned, "chat", "yes", recipient="Sam")["user"]
-        self.assertIn("shorter replies to Dana", to_dana)
-        self.assertNotIn("shorter replies to Dana", to_sam)
+        to_dana = compose.learned_notes(learned, "chat", "Dana")
+        to_sam = compose.learned_notes(learned, "chat", "Sam")
+        self.assertEqual(to_dana, "- shorter replies to Dana\n- write okay, not ok")
+        self.assertEqual(to_sam, "- write okay, not ok")
         self.assertNotIn("no exclamation marks in email", to_dana)
-        self.assertIn("write okay, not ok", to_sam)
         self.assertNotIn("Notes from comparing drafts", to_dana)   # the file's own header is never sent
-        empty = compose.build_kit(bank, s, rtext, build.LEARNED_HEADER, "chat", "yes")["user"]
-        self.assertNotIn("Learned from my edits", empty)
+        self.assertEqual(compose.learned_notes(build.LEARNED_HEADER, "chat"), "")
+        self.assertEqual(compose.learned_notes("## Tone\n- dry humour is fine\n", "email"), "Tone\n- dry humour is fine")
 
     def test_dedupe_and_mask(self):
         recs = [make_record("x", "chat", "Call me at 555-010-0199"), make_record("x", "chat", "call me at 555 010 0199!"),
@@ -448,12 +418,10 @@ class TestCheck(TempPack):
         self.assertTrue(0.08 < lo < 0.12 and 0.45 < hi < 0.5)
 
     def test_prepare_page_score_offline(self):
-        stats = build.build(self.pack)
+        build.build(self.pack)
         s, bank, _ = build.load_pack(self.pack)
         items = check.select_items(bank, s, "chat", n=8)
         self.assertGreaterEqual(len(items), 4)
-        fixed = set(s["registers"]["chat"]["fixed_ids"])
-        self.assertFalse({i["id"] for i in items} & fixed)
         gens = [{"item_id": i["id"], "condition": "voice", "text": i["text"] + " ok", "brief": "b"} for i in items]
         pairs = check.page_data(items, gens)
         self.assertEqual(len(pairs), len(items))
@@ -508,14 +476,22 @@ class TestCLI(TempPack):
     def test_cli_flow(self):
         out = self.run_cli("build")
         self.assertIn("chat", out)
-        out = self.run_cli("kit", "--register", "chat", "--notes", "yes; 3pm", "--recipient", "Casey")
-        kit = out.split("kit: ", 1)[1].split("\n", 1)[0].strip()
-        d = os.path.join(kit, "draft.txt")
+        self.assertIn("pack format v2", self.run_cli("status"))
+        out = self.run_cli("context", "--register", "chat", "--notes", "yes; 3pm", "--recipient", "Casey")
+        ctx = os.path.dirname(out.split("system: ", 1)[1].split("\n", 1)[0].strip())
+        d = os.path.join(ctx, "draft.txt")
         with open(d, "w") as f:
             f.write("Sure, 3pm works")
         self.assertIn("lint:", self.run_cli("lint", "--register", "chat", "--file", d))
-        self.assertTrue(self.run_cli("critique-prompt", "--kit", kit, "--draft-file", d).strip().endswith(".md"))
-        self.run_cli("log-draft", "--kit", kit, "--file", d)
+        self.run_cli("log-draft", "--context-dir", ctx, "--file", d)
+        logged = read_jsonl(os.path.join(self.pack, "drafts.jsonl"))[-1]
+        self.assertEqual((logged["register"], logged["recipient"], logged["text"]), ("chat", "Casey", "Sure, 3pm works"))
+        self.assertTrue(os.path.exists(os.path.join(ctx, "final.txt")))
+        for gone in ("kit", "critique", "critique-prompt"):
+            err = io.StringIO()
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
+                self.run_cli(gone)
+            self.assertIn("invalid choice: '%s'" % gone, err.getvalue())
         self.assertIn("similarity", self.run_cli("learn", "diff", "--register", "chat", "--sent", "3 works"))
         self.run_cli("learn", "note", "--register", "chat", "--text", "shorter replies to Casey")
         with open(os.path.join(self.pack, "learned.md")) as f:
@@ -550,11 +526,6 @@ class TestFixes2(TempPack):
         self.assertEqual(stylo.body_end("ok\nSounds Good"), "ok\nSounds Good")
         F = stylo.features([t, "Hello,\n\nAll done here.\n\nJordan"])
         self.assertEqual(F["share_end_none"], 0.0)
-
-    def test_fixed_exemplars_allow_multiline_email(self):
-        recs = [make_record("email_file", "email", "Hi Casey,\n\nThe order for week %d is fine by me, ship as usual.\n\nThanks,\nJordan" % i,
-                            rid="e%d" % i, recipient="Casey %d" % i) for i in range(8)]
-        self.assertEqual(len(rules.choose_fixed(recs, k=4, n_sets=50)), 4)
 
     def test_intl_phone_and_subject_masked(self):
         self.assertNotIn("7946", textutil.mask_pii("call me on +44 20 7946 0958"))
@@ -646,7 +617,9 @@ class TestFixes3(TempPack):
             check.score_picks(dict(old, key=None), run)
         new = export()
         self.assertNotEqual(new["key"], old["key"])
-        self.assertEqual(check.score_picks(new, run)["plain"]["n"], len(items))
+        sp = check.score_picks(new, run)     # each item in one condition only: no real message shown twice
+        self.assertEqual(sp["plain"]["n"] + sp["voice"]["n"], len(items))
+        self.assertTrue(sp["plain"]["n"] and sp["voice"]["n"])
         # stale picks.json saved earlier don't crash `score`
         with open(os.path.join(run, "picks.json"), "w") as f:
             json.dump(old, f)

@@ -1,17 +1,20 @@
-"""Turn measured stats into rules.md (frequency-calibrated) and profile.md (human summary).
+"""Turn measured stats into rules.md (hard rules) and profile.md (human summary with tendencies).
 
-Design rules from run 1 of the research (see docs/research.md):
-- Only habits that are truly absent (or near-universal) in a decent sample become never/always rules.
-- Everything else is written as a frequency ("about 1 in 4 messages"), because command-style rules
-  made models overuse signature habits (caricature).
-- The person's measured level of imperfection is stated as *permitted*, so drafts aren't tidier
-  than the real person.
-- Length targets come from the person's real distribution (median / IQR / p90).
+Pack v2: the drafter learns the voice from the archive of the person's own messages, so rules.md
+carries only what lint enforces and the drafter must not break:
+- never/always rules: habits truly absent (or near-universal) in a decent sample, the avoid list
+  of AI-isms, spelling preferences (one variant in 80%+ of 5+ uses), and the length line from the
+  person's real distribution (median / IQR / p90);
+- the user's own KEEP section, which survives rebuilds.
+Frequencies ("about 1 in 4 messages") and the measured imperfection go to profile.md for the user to read;
+they are not sent to the drafter as rules (in run 1 frequency rules in the prompt still made models overuse
+signature habits). A few of the same numbers reach the draft only as habits.py's "How my messages vary"
+note after the archive (on by default, `--habits off`), stated as rates over the whole archive. Lint's caricature counter reads the same
+numbers from stats.json (`caricature_habits`, `spelling_prefs`).
 """
-import random
 import re
 
-from .stylo import AIISMS, message_markers
+from .stylo import AIISMS
 
 MIN_N_NEVER = 25      # messages needed before an absence becomes a "never" rule
 MIN_N_NEVER_SOLO = 40  # below this, a never/always rule must also hold in a larger register
@@ -136,46 +139,46 @@ def register_rules(reg, F):
         length.append("Typically %s sentence(s) per message, %s words per sentence on average."
                       % (_fmt_words(g("sentences_per_msg_median")), _fmt_words(g("sentence_len_mean"))))
 
-    def tendency(key, label, marker=""):
+    def tendency(key, label):
         p = g(key)
         if 0.02 <= p <= 0.95:
-            tend.append("%s: %s.%s" % (label, freq_of(p), (" " + marker) if marker else ""))
+            tend.append("%s: %s." % (label, freq_of(p)))
 
     ops = [w for w, _ in (F.get("top_openers") or [])][:5]
     extra = (" (yours: %s)" % ", ".join('"%s,"' % w.capitalize() for w in ops)) if ops else ""
     if 0.02 <= g("share_msgs_ack_opener") <= 0.95:
         tend.append("Opens with a short acknowledgment word and a comma: %s%s. The rest get "
-                    "straight to the point, so don't add one by default. <!-- lint:habit=ack_opener -->"
+                    "straight to the point, so don't add one by default."
                     % (freq_of(g("share_msgs_ack_opener")), extra))
     if 0.02 <= g("share_msgs_exclaim") <= 0.95:
-        tend.append("Exclamation mark: %s, at most one. <!-- lint:habit=exclaim -->"
+        tend.append("Exclamation mark: %s, at most one."
                     % freq_of(g("share_msgs_exclaim")))
     tendency("share_msgs_question", "Contains a question")
     if 0.02 <= g("share_msgs_hedge") <= 0.95:
         top = sorted((F.get("hedges") or {}).items(), key=lambda kv: -kv[1])[:5]
-        tend.append("Hedges (%s): %s. <!-- lint:habit=hedge -->"
+        tend.append("Hedges (%s): %s."
                     % (", ".join('"%s"' % k for k, _ in top) or "softeners", freq_of(g("share_msgs_hedge"))))
-    tendency("share_msgs_ellipsis", "Ellipsis (...)", "<!-- lint:habit=ellipsis -->")
+    tendency("share_msgs_ellipsis", "Ellipsis (...)")
     tendency("share_msgs_spaced_hyphen", "Spaced hyphen as a dash (\" - \")")
     tendency("share_msgs_dash", "Em/en dash")
     tendency("share_msgs_spaced_slash", "Spaced slash for alternatives (\"a / b\")")
     tendency("share_msgs_parentheses", "Parenthetical aside")
-    tendency("share_msgs_laugh", "Laughter word (haha / lol)", "<!-- lint:habit=laugh -->")
-    tendency("share_msgs_emoji", "Emoji", "<!-- lint:habit=emoji -->")
+    tendency("share_msgs_laugh", "Laughter word (haha / lol)")
+    tendency("share_msgs_emoji", "Emoji")
     tendency("share_msgs_greeting", "Greeting")
     tendency("share_msgs_signoff", "Sign-off")
     tendency("share_msgs_line_break", "Line breaks")
     for best, others, bc, tot in _variant_prefs(F.get("variants") or {}):
-        tend.append("Spelling: you write \"%s\" (%d of %d times), not %s. <!-- lint:prefer=%s:%s -->"
-                    % (best, bc, tot, " / ".join('"%s"' % o for o in others), best, "|".join(others)))
+        tend.append("Spelling: you write \"%s\" (%d of %d times), not %s."
+                    % (best, bc, tot, " / ".join('"%s"' % o for o in others)))
     if g("flourishes_per_msg_mean"):
         tend.append("Signature habits per message: %.1f on average, rarely more than %s. Don't stack "
-                    "several in one message. <!-- lint:density -->"
+                    "several in one message."
                     % (g("flourishes_per_msg_mean"), _fmt_words(max(1, g("flourishes_per_msg_p90")))))
 
     lvl = F.get("imperfection_level", "low")
     imperf.append("Measured imperfection level: **%s**. Real messages are not tidy; match this level, "
-                  "don't polish it away and don't exaggerate it. <!-- lint:polish -->" % lvl)
+                  "don't polish it away and don't exaggerate it." % lvl)
     if g("share_end_none") >= 0.05:
         imperf.append("No final punctuation: %s." % freq_of(g("share_end_none")))
     if g("share_sentences_lowercase_start") >= 0.03:
@@ -196,26 +199,33 @@ def register_rules(reg, F):
     return never, length, tend, imperf
 
 
-def build_rules_md(all_stats, built_at, keep_text=""):
-    L = ["# Voice rules", "",
-         "<!-- Generated by write-like-me on %s. Everything above the KEEP BELOW line is regenerated on "
-         "rebuild (the previous file is saved as rules.prev.md). Lines with lint markers are checked by "
-         "`wlm.py lint`; delete a line to stop enforcing it. -->" % built_at, "",
-         "How to use these: **Never / always** rules are hard. **Tendencies** are frequencies across many "
-         "messages, not instructions for every message: if a habit shows up in 1 of 4 real messages, most "
-         "drafts should not have it. **Permitted imperfection** describes how unpolished the real text is.",
-         ""]
-    av = avoid_list(all_stats)
-    L += ["## all", "", "### Avoid list (default-assistant phrasing you don't use)", "",
-          "- %s <!-- lint:avoid=%s -->" % (", ".join('"%s"' % a for a in av), "|".join(av)), ""]
+# Habits lint's caricature counter watches (per-message share in stats features: share_msgs_<h>)
+CARICATURE_HABITS = ("ack_opener", "exclaim", "hedge", "ellipsis", "laugh", "emoji")
+
+
+def caricature_habits(F):
+    """Optional habits (present in 2-95% of real messages) that drafts tend to overuse."""
+    return [h for h in CARICATURE_HABITS if 0.02 <= F.get("share_msgs_" + h, 0.0) <= 0.95]
+
+
+def spelling_prefs(F):
+    """[{"use": "yeah", "not": ["yea", "ya"], "seen": 41, "of": 44}, ...] for variant groups where one
+    spelling has at least 80% of 5+ uses."""
+    return [{"use": best, "not": others, "seen": bc, "of": tot}
+            for best, others, bc, tot in _variant_prefs(F.get("variants") or {})]
+
+
+def _per_register(all_stats):
+    """{register: (never, length, tendencies, imperfection)} with thin registers' unsupported
+    never/always rules moved to the tendencies as "probably true"."""
     per_reg = {reg: register_rules(reg, F) for reg, F in all_stats.items()}
     solid = set()
     for reg, F in all_stats.items():
         if F.get("messages", 0) >= MIN_N_NEVER_SOLO:
             solid |= set(per_reg[reg][0])
+    out = {}
     for reg, F in all_stats.items():
         n = F.get("messages", 0)
-        conf = "ok" if n >= MIN_N_OK else "LOW (few samples; treat rules as rough)"
         never, length, tend, imperf = per_reg[reg]
         if n < MIN_N_NEVER_SOLO and never:
             # an absence in a few dozen messages is weak evidence (a 5%-habit is missing from 26
@@ -223,15 +233,39 @@ def build_rules_md(all_stats, built_at, keep_text=""):
             weak = [x for x in never if x not in solid]
             never = [x for x in never if x in solid]
             if weak:
-                tend = tend + ["Probably true, but %d messages are too few to enforce as hard rules: %s." % (n, "; ".join(re.sub(r"\s*<!--.*?-->", "", x).rstrip(".")
-                                                              for x in weak))]
+                tend = tend + ["Probably true, but %d messages are too few to enforce as hard rules: %s."
+                               % (n, "; ".join(_strip_markers(x).rstrip(".") for x in weak))]
+        out[reg] = (never, length, tend, imperf)
+    return out
+
+
+def _strip_markers(line):
+    return re.sub(r"\s*<!--.*?-->", "", line).strip()
+
+
+def build_rules_md(all_stats, built_at, keep_text=""):
+    """Hard rules only: the avoid list, never/always per register, the length line, and KEEP."""
+    L = ["# Voice rules", "",
+         "<!-- Generated by write-like-me on %s. Everything above the KEEP BELOW line is regenerated on "
+         "rebuild (the previous file is saved as rules.prev.md). Lines with lint markers are checked by "
+         "`wlm.py lint`; delete a line to stop enforcing it. -->" % built_at, "",
+         "These are hard rules: your real messages never break them, so a draft shouldn't either. How "
+         "often you use each habit is in profile.md, for reading; the drafter learns that from your own "
+         "messages in the archive, not from rules.",
+         ""]
+    av = avoid_list(all_stats)
+    L += ["## all", "", "### Avoid list (default-assistant phrasing you don't use)", "",
+          "- %s <!-- lint:avoid=%s -->" % (", ".join('"%s"' % a for a in av), "|".join(av)), ""]
+    for reg, (never, length, _, _) in _per_register(all_stats).items():
+        n = all_stats[reg].get("messages", 0)
+        conf = "ok" if n >= MIN_N_OK else "LOW (few samples; treat rules as rough)"
         L += ["## %s" % reg, "", "_%d messages, confidence: %s_" % (n, conf), ""]
+        never = never + ["Always \"%s\", never %s (%d of %d times). <!-- lint:prefer=%s:%s -->"
+                         % (p["use"], " / ".join('"%s"' % o for o in p["not"]), p["seen"], p["of"], p["use"],
+                            "|".join(p["not"])) for p in spelling_prefs(all_stats[reg])]
         if never:
             L += ["### Never / always", ""] + ["- " + x for x in never] + [""]
-        L += ["### Length", ""] + ["- " + x for x in length] + [""]
-        if tend:
-            L += ["### Tendencies (match the frequency; never all at once)", ""] + ["- " + x for x in tend] + [""]
-        L += ["### Permitted imperfection", ""] + ["- " + x for x in imperf] + [""]
+        L += ["### Length", "", "- " + length[0], ""]
     L += [KEEP_MARK, ""]
     if keep_text.strip():
         L.append(keep_text.strip())
@@ -264,14 +298,23 @@ def parse_rules(text, register):
     return out
 
 
-def build_profile_md(all_stats, sources_summary, built_at):
+def build_profile_md(all_stats, sources_summary, built_at, archive_summary=None):
     L = ["# Voice profile", "",
-         "_Generated %s. Human-readable summary of your measured habits; `rules.md` is what the drafting "
-         "skill follows, and you can edit it._" % built_at, "",
+         "_Generated %s. Human-readable summary of your measured habits, for reading: the drafter learns "
+         "your voice from your own messages in `archive/`, and of the numbers here it sees only a short "
+         "\"How my messages vary\" note (length, open endings, openers, \"!\" and hedges; `--habits off` "
+         "turns it off). The hard "
+         "rules lint checks are in `rules.md`, and you can edit that file._" % built_at, "",
          "## Sources", ""]
     for src, c in sorted(sources_summary.items()):
         L.append("- %s: %d samples" % (src, c))
     L.append("")
+    if archive_summary:
+        L += ["## Archive", ""]
+        for reg, a in archive_summary.items():
+            L.append("- %s: %d messages, about %d tokens" % (reg, a["entries"], a["tokens"]))
+        L.append("")
+    per_reg = _per_register(all_stats)
     for reg, F in all_stats.items():
         n = F.get("messages", 0)
         if not n:
@@ -304,101 +347,18 @@ def build_profile_md(all_stats, sources_summary, built_at):
             top = sorted(var.items(), key=lambda kv: -kv[1])[:12]
             L.append("Word choices seen: " + ", ".join("%s x%d" % kv for kv in top))
             L.append("")
+        _, length, tend, imperf = per_reg[reg]
+        if len(length) > 1:
+            L += ["### Length", ""] + ["- " + _strip_markers(x) for x in length[1:]] + [""]
+        if tend:
+            L += ["### Tendencies (how often, across many messages; not a rule for any one message)", ""]
+            L += ["- " + _strip_markers(x) for x in tend] + [""]
+        L += ["### Permitted imperfection", ""] + ["- " + _strip_markers(x) for x in imperf] + [""]
     L += ["## Notes", "",
           "Typical AI-assistant output is longer, tidier and more polite than real messages: greetings, "
           "sign-offs, closing offers, bullet lists, em dashes, \"please\", exclamation marks and full "
           "punctuation. The numbers above are what make you different from that default.", ""]
     return "\n".join(L)
-
-
-FIXED_HABITS = ("ack_opener", "hedge", "question", "exclaim", "spaced_hyphen", "spaced_slash",
-                "parentheses", "no_end_punct", "laugh", "ellipsis")
-GROUP_CHAT_TYPES = {"group", "meeting", "channel"}
-
-
-def _fixed_eligible(records, max_words):
-    """Messages fit to show as stable voice samples: own prose (no URLs, code, paths, emails or
-    long quotes), one paragraph (unless most of the register is multi-line, as in email), not a lead-in to an attachment ("Here's the file:"), and from a
-    1:1 conversation when the source says so."""
-    from .textutil import normalise, word_count
-    out = []
-    for r in records:
-        if r.get("flags"):
-            continue
-        text = (r.get("text") or "").strip()
-        wc = r.get("word_count") or word_count(text)
-        if wc < 5 or (max_words and wc > max_words):
-            continue
-        n = normalise(text)
-        if re.search(r"\b(?:URL|CODE|PATH|EMAIL|QUOTE)\b|\[(?:email|phone)\]", n) or text.endswith(":"):
-            continue
-        out.append((wc, r))
-    # one paragraph, unless multi-line is how this register normally looks (email, docs)
-    single = [x for x in out if "\n" not in x[1]["text"].strip()]
-    if len(single) >= len(out) * 0.5:
-        out = single
-    one2one = [x for x in out if x[1].get("chat_type") not in GROUP_CHAT_TYPES]
-    if len(one2one) >= 30 or len(one2one) >= len(out) * 0.5:
-        out = one2one
-    with_ctx = [x for x in out if x[1].get("context")]
-    if len(with_ctx) >= 30:
-        out = with_ctx
-    return out
-
-
-def choose_fixed(records, k=6, seed=20261106, max_words=None, n_sets=4000, mean_words=None):
-    """Pick k exemplars for a register: the stable core of the voice shown in every draft.
-
-    The set as a whole should look like the person on an average day: each optional habit
-    (acknowledgment opener, hedges, questions, '!', spaced hyphen / slash, parentheses, no final
-    punctuation, laughter, ellipsis) appears in the set at about its measured rate, lengths span
-    short / medium / long with the set's mean near the register's mean, recipients differ, and no
-    single message stacks habits. Run 2 showed
-    why this matters: a set of flat, habit-free messages (picked only by length and recipient)
-    made drafts noticeably less like the person on every style-embedding score, while keeping
-    habit rates in check avoids the opposite failure (caricature).
-    """
-    elig = _fixed_eligible(records, max_words)
-    if not elig:
-        return []
-    k = min(k, len(elig))
-    elig.sort(key=lambda x: (x[0], x[1]["id"]))
-    n = len(elig)
-    marks = [message_markers(r["text"]) for _, r in elig]
-    base = {h: sum(m[h] for m in marks) / float(n) for h in FIXED_HABITS}
-    # target the register's MEAN length (pulled up by the long tail), not its median: a set of
-    # median-length messages carries too little of the voice (run 2: 117 vs 184 words per set)
-    target_mean = (mean_words or sum(wc for wc, _ in elig) / float(n))
-    terciles = [[], [], []]
-    for i in range(n):
-        terciles[min(2, i * 3 // n)].append(i)
-    per_t = [k // 3 + (1 if t < k % 3 else 0) for t in range(3)]
-    rng = random.Random(seed)
-    calm = [i for i in range(n) if sum(marks[i][h] for h in FIXED_HABITS if h != "hedge") <= 2]
-    calm_set = set(calm)
-    pools = [[i for i in t if i in calm_set] or t for t in terciles]
-
-    def cost(ix):
-        c = sum(abs(sum(marks[i][h] for i in ix) / float(len(ix)) - base[h]) for h in FIXED_HABITS)
-        rc = [elig[i][1].get("recipient") or "" for i in ix]
-        c += 0.15 * (len(rc) - len(set(rc)))
-        c += 0.5 * abs(sum(elig[i][0] for i in ix) / float(len(ix)) - target_mean) / max(target_mean, 1)
-        return c
-
-    best, best_c = None, None
-    for _ in range(n_sets):
-        ix = []
-        for t, m in zip(pools, per_t):
-            if t:
-                ix += rng.sample(t, min(m, len(t)))
-        if len(ix) < k:
-            rest = [i for i in range(n) if i not in ix]
-            ix += rng.sample(rest, k - len(ix))
-        c = cost(ix)
-        if best_c is None or c < best_c - 1e-12:
-            best, best_c = ix, c
-    best.sort(key=lambda i: elig[i][0])
-    return [elig[i][1]["id"] for i in best]
 
 
 def rules_section(text, register):

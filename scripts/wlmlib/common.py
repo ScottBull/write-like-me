@@ -2,6 +2,7 @@
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 
@@ -26,6 +27,36 @@ REGISTER_HELP = {
 #   flags      list of strings; see build.EXCLUDE_FLAGS
 RECORD_KEYS = ("id", "source", "register", "timestamp", "text", "recipient",
                "thread", "context", "flags")
+
+# Pack format. v1 (plugin 0.1.x) had no pack_version in stats.json, kept the bank in
+# exemplars.jsonl and per-register fixed_ids; v2 keeps the bank as archive/<register>.jsonl
+# (see archive.py) and `wlm build` upgrades a v1 pack in place from sources/.
+PACK_VERSION = 2
+ARCHIVE_DIR = "archive"
+# Archive entry schema (one JSON object per line, date order, oldest first; entries with no
+# timestamp come first): the cleaned, masked record with these keys first, then any extra
+# fields the extractor wrote (subject, chat_type, ...), and no flags (the bank has none).
+#   word_count  words in text
+#   notes       flags the record carried before cleaning (informational)
+#   tokens_est  estimated prompt cost of the rendered entry (header, context, text) in tokens
+ARCHIVE_KEYS = ("id", "source", "register", "timestamp", "recipient", "thread", "context",
+                "text", "word_count", "notes", "tokens_est")
+CHARS_PER_TOKEN = 2.77     # measured on the pilot archive (712,884 chars -> 257,491 tokens)
+
+
+def est_tokens(chars):
+    """Token estimate for `chars` characters of archive text (rounded up, at least 1)."""
+    return max(1, int(math.ceil(chars / CHARS_PER_TOKEN)))
+
+
+def pack_version(stats):
+    """Format version of a built pack from its stats.json (a v1 pack has no pack_version)."""
+    if not stats:
+        return None
+    try:
+        return int(stats.get("pack_version") or 1)
+    except (TypeError, ValueError):
+        return 1
 
 
 def claude_dir():
