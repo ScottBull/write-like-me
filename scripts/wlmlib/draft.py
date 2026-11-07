@@ -20,12 +20,12 @@ import tempfile
 import time
 
 from .common import private_open
-from .llm import available, child_env
+from .llm import available, child_env, claude_bin
 
 
 def command(system_file, model=None):
     """The argv of one draft call. Holds only the path of the system file, never its text."""
-    cmd = ["claude", "-p", "--tools", "", "--system-prompt-file", os.path.abspath(system_file),
+    cmd = [claude_bin(), "-p", "--tools", "", "--system-prompt-file", os.path.abspath(system_file),
            "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",
            "--no-session-persistence", "--output-format", "json"]
     if model:

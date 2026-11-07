@@ -144,3 +144,17 @@ class TestContextTemplate(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestClaudeBinOverride(unittest.TestCase):
+    def test_env_override(self):
+        from wlmlib import llm
+        old = os.environ.pop("WRITE_LIKE_ME_CLAUDE", None)
+        try:
+            self.assertEqual(llm.claude_bin(), "claude")
+            os.environ["WRITE_LIKE_ME_CLAUDE"] = "/opt/bin/my-claude-wrapper"
+            self.assertEqual(llm.claude_bin(), "/opt/bin/my-claude-wrapper")
+        finally:
+            os.environ.pop("WRITE_LIKE_ME_CLAUDE", None)
+            if old is not None:
+                os.environ["WRITE_LIKE_ME_CLAUDE"] = old

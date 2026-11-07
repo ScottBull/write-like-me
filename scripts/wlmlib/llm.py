@@ -69,8 +69,13 @@ def fill(tmpl, **kw):
     return out
 
 
+def claude_bin():
+    """The Claude Code CLI to run: $WRITE_LIKE_ME_CLAUDE (a wrapper script, say) or `claude`."""
+    return os.environ.get("WRITE_LIKE_ME_CLAUDE") or "claude"
+
+
 def available():
-    return shutil.which("claude") is not None
+    return shutil.which(claude_bin()) is not None
 
 
 def call(system, user, cache_dir=None, model=None, retries=2, timeout=600):
@@ -86,7 +91,7 @@ def call(system, user, cache_dir=None, model=None, retries=2, timeout=600):
     if not available():
         raise RuntimeError("the `claude` CLI is not on PATH")
     env = child_env()
-    cmd = ["claude", "-p", "--tools", "", "--system-prompt", system, "--setting-sources", "",
+    cmd = [claude_bin(), "-p", "--tools", "", "--system-prompt", system, "--setting-sources", "",
            "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
            "--output-format", "json"]
     if model:
