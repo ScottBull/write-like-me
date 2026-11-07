@@ -1,0 +1,10 @@
+{
+  "name": "write-like-me",
+  "version": "0.1.0",
+  "description": "Build a local voice pack from your own sent writing, then have Claude draft chat messages, emails and docs that sound like you.",
+  "author": { "name": "Scott Bull", "url": "https://github.com/ScottBull" },
+  "homepage": "https://github.com/ScottBull/write-like-me",
+  "repository": "https://github.com/ScottBull/write-like-me",
+  "license": "MIT",
+  "keywords": ["writing", "voice", "style", "ghostwriting", "email", "chat"]
+}

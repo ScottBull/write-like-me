@@ -1,0 +1,5 @@
+{"type": "assistant", "sessionId": "s1", "timestamp": "2026-03-05T08:39:00Z", "message": {"content": [{"type": "text", "text": "I updated the chart."}]}}
+{"type": "user", "uuid": "u1", "sessionId": "s1", "cwd": "/tmp/demo", "timestamp": "2026-03-05T08:40:00.000Z", "promptSource": "typed", "message": {"content": "can you make the chart axis start at zero, it looks misleading otherwise"}}
+{"type": "user", "uuid": "u2", "sessionId": "s1", "cwd": "/tmp/demo", "timestamp": "2026-03-05T08:41:00.000Z", "promptSource": "suggestion_accepted", "message": {"content": "run the tests"}}
+{"type": "user", "uuid": "u3", "sessionId": "s1", "cwd": "/tmp/demo", "timestamp": "2026-03-05T08:42:00.000Z", "message": {"content": [{"type": "tool_result", "content": "ok"}]}}
+{"type": "user", "uuid": "u4", "sessionId": "s1", "cwd": "/tmp/demo", "timestamp": "2026-03-05T08:50:00.000Z", "isMeta": true, "message": {"content": "summarise the open questions from the design review in a table"}}

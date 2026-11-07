@@ -1,0 +1,15 @@
+# Never commit personal data. The voice pack lives outside the repo (~/.claude/voice-pack).
+/voice-pack/
+exemplars.jsonl
+stats.json
+drafts.jsonl
+/sources/
+/vendor/
+/work/
+/check/
+*.olm
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+.playwright-mcp/

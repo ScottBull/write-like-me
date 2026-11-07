@@ -1,0 +1,15 @@
+{
+  "name": "write-like-me",
+  "description": "Marketplace for the write-like-me plugin.",
+  "owner": { "name": "Scott Bull", "url": "https://github.com/ScottBull" },
+  "plugins": [
+    {
+      "name": "write-like-me",
+      "source": "./",
+      "description": "Build a local voice pack from your own sent writing, then have Claude draft text that sounds like you.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "keywords": ["writing", "voice", "style"]
+    }
+  ]
+}

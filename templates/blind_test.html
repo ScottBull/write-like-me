@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice blind test</title>
+<style>
+:root {
+  --bg: #f7f6f3; --card: #ffffff; --ink: #1f1f1f; --muted: #6b6b6b; --line: #dedbd3;
+  --accent: #3b5bdb; --accent-ink: #ffffff; --good: #2b8a3e; --bad: #c92a2a; --pick: #e7ecff;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #17181a; --card: #222326; --ink: #ececec; --muted: #a0a0a0; --line: #3a3b3f;
+          --accent: #748ffc; --accent-ink: #111; --good: #69db7c; --bad: #ff8787; --pick: #2b3150; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+       font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 1.4rem; margin: 0 0 4px; }
+p.lead { color: var(--muted); margin: 0 0 20px; }
+.bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 12px 0 20px; }
+.bar > div { height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+.ctx { color: var(--muted); font-size: .92rem; border-left: 3px solid var(--line); padding: 4px 10px;
+       margin: 0 0 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.opts { display: grid; gap: 12px; }
+button.opt { text-align: left; background: var(--card); color: var(--ink); border: 1px solid var(--line);
+             border-radius: 10px; padding: 14px 16px; font: inherit; cursor: pointer; white-space: pre-wrap;
+             overflow-wrap: anywhere; }
+button.opt:hover, button.opt:focus-visible { border-color: var(--accent); outline: none; }
+button.opt .lab { display: block; font-size: .75rem; color: var(--muted); margin-bottom: 4px; letter-spacing: .04em; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; align-items: center; }
+.btn { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 8px; padding: 9px 14px;
+       font: inherit; cursor: pointer; }
+.btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+label.conf { color: var(--muted); font-size: .9rem; }
+.result { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+.big { font-size: 2rem; font-weight: 600; }
+.ok { color: var(--good); } .no { color: var(--bad); }
+.src { display: inline-block; font-size: .8rem; border: 1px solid var(--line); border-radius: 999px;
+       padding: 2px 10px; margin: 0 0 12px; color: var(--muted); }
+.src.demo { background: #fff3bf; color: #5c3c00; border-color: #f0c000; font-weight: 600; }
+.review { margin-top: 16px; display: grid; gap: 10px; }
+.review div { border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: .92rem;
+              white-space: pre-wrap; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<main>
+  <div id="src" class="src"></div>
+  <h1>Which one did you write?</h1>
+  <p class="lead">Each pair has one message you really sent and one written by Claude from a summary of it.
+    Pick the real one. Go with your gut; there's no need to agonise. Your answers stay in this browser until you export them.</p>
+  <div class="bar"><div id="prog"></div></div>
+  <section id="app"></section>
+</main>
+<script>
+const DATA = /*__DATA__*/null;
+const KEY = "wlm-blind-" + (DATA && DATA.run) + "-" + (DATA && DATA.key);
+function load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } }
+function save(s) { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {} }
+let state = load();
+const pairs = (DATA && DATA.pairs) || [];
+const app = document.getElementById("app");
+(function () {
+  const b = document.getElementById("src");
+  if (DATA && DATA.demo) {
+    b.className = "src demo";
+    b.textContent = "DEMO: " + (DATA.label || "synthetic test data") + ". These are not your messages; the score means nothing.";
+  } else b.textContent = "Data: " + ((DATA && DATA.label) || "your real messages") + " · run " + ((DATA && DATA.run) || "?");
+})();
+function truth(p) { try { return atob(p.k); } catch (e) { return "?"; } }
+function el(tag, attrs, text) {
+  const e = document.createElement(tag);
+  for (const k in (attrs || {})) e.setAttribute(k, attrs[k]);
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function render() {
+  const done = pairs.filter(p => state[p.pid]).length;
+  document.getElementById("prog").style.width = (pairs.length ? 100 * done / pairs.length : 0) + "%";
+  app.textContent = "";
+  const next = pairs.find(p => !state[p.pid]);
+  if (!next) return renderResult();
+  const n = pairs.indexOf(next) + 1;
+  app.appendChild(el("p", {class: "lead"}, "Pair " + n + " of " + pairs.length));
+  if (next.context) app.appendChild(el("div", {class: "ctx"}, "Replying to: " + next.context));
+  const opts = el("div", {class: "opts"});
+  for (const side of ["A", "B"]) {
+    const b = el("button", {class: "opt", type: "button"});
+    b.appendChild(el("span", {class: "lab"}, side));
+    b.appendChild(document.createTextNode(side === "A" ? next.a : next.b));
+    b.onclick = () => pick(next, side);
+    opts.appendChild(b);
+  }
+  app.appendChild(opts);
+  const row = el("div", {class: "row"});
+  const lab = el("label", {class: "conf"}, "Confidence ");
+  const sel = el("select", {id: "conf"});
+  for (const [v, t] of [["50", "guessing"], ["70", "fairly sure"], ["90", "sure"]]) {
+    const o = el("option", {value: v}, t); sel.appendChild(o);
+  }
+  sel.value = "70";
+  lab.appendChild(sel); row.appendChild(lab);
+  const note = el("input", {id: "note", type: "text", placeholder: "How could you tell? (optional)",
+                            style: "flex:1;min-width:180px;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)"});
+  row.appendChild(note);
+  if (done) {
+    const undo = el("button", {class: "btn ghost", type: "button"}, "Undo last");
+    undo.onclick = () => { const last = pairs.filter(p => state[p.pid]).pop(); delete state[last.pid]; save(state); render(); };
+    row.appendChild(undo);
+  }
+  app.appendChild(row);
+}
+function pick(p, side) {
+  const c = document.getElementById("conf"), n = document.getElementById("note");
+  state[p.pid] = {picked: side, confidence: +(c ? c.value : 70), note: n ? n.value : "", at: new Date().toISOString()};
+  save(state); render(); window.scrollTo(0, 0);
+}
+function results() {
+  return pairs.map(p => {
+    const s = state[p.pid] || {};
+    return {pid: p.pid, item: p.item, condition: p.condition, picked: s.picked || null,
+            correct: s.picked ? s.picked === truth(p) : null, confidence: s.confidence || null, note: s.note || ""};
+  });
+}
+function renderResult() {
+  const r = results(), n = r.length, fooled = r.filter(x => x.correct === false).length;
+  const box = el("div", {class: "result"});
+  box.appendChild(el("div", {class: "big"}, fooled + " / " + n + " fooled you"));
+  box.appendChild(el("p", {}, "That's a fooling rate of " + Math.round(100 * fooled / Math.max(1, n)) +
+    "%. 50% means you couldn't tell them apart; 0% means you always spotted the fake."));
+  const row = el("div", {class: "row"});
+  const ex = el("button", {class: "btn", type: "button"}, "Export picks (JSON)");
+  ex.onclick = () => {
+    const blob = new Blob([JSON.stringify({run: DATA.run, key: DATA.key, exported: new Date().toISOString(), picks: r}, null, 1)],
+                          {type: "application/json"});
+    const a = el("a", {href: URL.createObjectURL(blob), download: "picks-" + DATA.run + ".json"});
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+  const reset = el("button", {class: "btn ghost", type: "button"}, "Start over");
+  reset.onclick = () => { if (confirm("Clear your picks?")) { state = {}; save(state); render(); } };
+  row.appendChild(ex); row.appendChild(reset); box.appendChild(row);
+  const rev = el("div", {class: "review"});
+  pairs.forEach(p => {
+    const s = state[p.pid] || {}, t = truth(p);
+    const d = el("div");
+    d.appendChild(el("strong", {class: s.picked === t ? "ok" : "no"}, s.picked === t ? "Spotted. " : "Fooled. "));
+    d.appendChild(document.createTextNode("Real: " + (t === "A" ? p.a : p.b) + "\n\nClaude: " + (t === "A" ? p.b : p.a) +
+      (s.note ? "\n\nYour note: " + s.note : "")));
+    rev.appendChild(d);
+  });
+  app.appendChild(box);
+  app.appendChild(el("p", {class: "lead", style: "margin-top:16px"}, "Review (spoilers):"));
+  app.appendChild(rev);
+}
+if (!pairs.length) app.textContent = "No pairs in this test.";
+else render();
+</script>
+</body>
+</html>

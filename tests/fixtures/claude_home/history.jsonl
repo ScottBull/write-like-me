@@ -1,0 +1,6 @@
+{"display": "can you make the chart axis start at zero, it looks misleading otherwise", "timestamp": 1772700000000, "project": "/tmp/demo", "sessionId": "s1", "pastedContents": {}}
+{"display": "/clear", "timestamp": 1772700100000, "project": "/tmp/demo", "sessionId": "s1", "pastedContents": {}}
+{"display": "!ls -la", "timestamp": 1772700200000, "project": "/tmp/demo", "sessionId": "s1", "pastedContents": {}}
+{"display": "looks good. ship it [Pasted text #1 +40 lines]", "timestamp": 1772700300000, "project": "/tmp/demo", "sessionId": "s1", "pastedContents": {"1": {"type": "text", "content": "x"}}}
+{"display": "summarise the open questions from the design review in a table", "timestamp": 1772700600000, "project": "/tmp/demo", "sessionId": "s1", "pastedContents": {}}
+{"display": "This session is being continued from a previous conversation that ran out of context.", "timestamp": 1772700700000, "project": "/tmp/other", "sessionId": "s2", "pastedContents": {}}
