@@ -5,12 +5,13 @@ import json
 import os
 import re
 
-REGISTERS = ("chat", "email", "doc", "prompt")
+REGISTERS = ("chat", "email", "doc", "prompt", "post")
 REGISTER_HELP = {
     "chat": "short messages: Teams, Slack, iMessage, SMS",
     "email": "email you sent",
-    "doc": "longer prose: documents, notes, posts",
+    "doc": "longer prose: documents, notes",
     "prompt": "what you type to AI assistants (Claude Code)",
+    "post": "public posts and comments: Reddit, forums",
 }
 
 # Record schema shared by every extractor (one JSON object per line):

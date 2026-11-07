@@ -1,7 +1,7 @@
 ---
 name: voice-check
 description: Optional evaluation of the user's voice pack. Holds out some of their real messages, has Claude write each one from a content-only summary, then builds a blind-test page where the user picks their real message from each pair, and scores stylometric closeness plus a forced-choice LLM judge. Use when the user asks "how good is my voice pack", "test it", "does it sound like me", or wants a blind test.
-argument-hint: "[register: chat|email|doc|prompt] [number of messages, default 12]"
+argument-hint: "[register: chat|email|doc|post|prompt] [number of messages, default 12]"
 ---
 
 # Voice check

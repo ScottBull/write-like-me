@@ -18,8 +18,13 @@ KIND = {
     "email": ("email", "emails", "email"),
     "doc": ("passage", "passages of documents", "documents"),
     "prompt": ("prompt", "prompts to an AI assistant", "prompts to an AI assistant"),
+    "post": ("comment", "posts and comments", "a public forum (Reddit)"),
 }
 SUPPLEMENT_MIN = 15   # below this many samples, borrow mechanics from another register
+# Prose registers borrow from public posts (the person's own longer prose) while they are thin,
+# a higher bar than SUPPLEMENT_MIN because a few dozen short emails say little about long ones.
+SUPPLEMENT_FROM = {"email": "post", "doc": "post"}
+SUPPLEMENT_PROSE_MIN = 40
 
 
 def template(name):
@@ -36,6 +41,9 @@ def render_task(context, notes, recipient="", register="chat", subject=""):
     if register in ("chat", "email"):
         parts.append("Message I'm replying to (may be empty if I'm starting the thread):\n<<<\n%s\n>>>"
                      % (ctx or "(none: I'm starting this one)"))
+    elif register == "post":
+        parts.append("Post or comment I'm replying to (may be empty if I'm starting a new post):\n<<<\n%s\n>>>"
+                     % (ctx or "(none: this is a new post)"))
     elif ctx:
         parts.append("Context:\n<<<\n%s\n>>>" % ctx)
     parts.append("What I want to say:\n%s" % (notes or "").strip())
@@ -90,7 +98,14 @@ def build_kit(bank, stats, rules_text, learned_text, register, notes, context=""
                  fixed_ids=fixed_ids, exclude_ids=exclude_ids, heldout=heldout)
     examples = R["fixed"] + R["retrieved"]
     supplement = []
-    if reg_info.get("n", 0) < SUPPLEMENT_MIN:
+    regs = stats.get("registers") or {}
+    pref = SUPPLEMENT_FROM.get(register)
+    if (pref and register != pref and reg_info.get("n", 0) < SUPPLEMENT_PROSE_MIN
+            and regs.get(pref, {}).get("n", 0) >= SUPPLEMENT_PROSE_MIN):
+        S = retrieve(bank, pref, query, k=3, n_critic=0, fixed_ids=(regs[pref].get("fixed_ids") or [])[:3],
+                     exclude_ids=exclude_ids, heldout=heldout)
+        supplement = (S["fixed"] + S["retrieved"])[:4]
+    elif reg_info.get("n", 0) < SUPPLEMENT_MIN:
         # thin register: borrow mechanics from the richest other register (prompt history last)
         others = sorted(((r, d) for r, d in (stats.get("registers") or {}).items() if r != register),
                         key=lambda rd: (rd[0] == "prompt", -rd[1].get("n", 0)))

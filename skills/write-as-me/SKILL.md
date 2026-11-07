@@ -18,9 +18,9 @@ Run `wlm status` before anything else. If it says there is no pack (`"built": fa
 ## 1. Understand the request
 
 Work out, asking only if it's genuinely unclear:
-- **register**: `chat` (Teams/Slack/iMessage/SMS), `email`, `doc` (longer prose), or `prompt` (to an AI). Default to chat for short replies, email when they say email.
+- **register**: `chat` (Teams/Slack/iMessage/SMS), `email`, `doc` (longer prose: documents, notes), `post` (public posts and comments: Reddit, forums), or `prompt` (to an AI). Default to chat for short replies, email when they say email, post when they mention Reddit or a forum.
 - **recipient** name, if any.
-- **context**: the message they're replying to, if they pasted or described it.
+- **context**: the message they're replying to (for `post`, the post or comment), if they pasted or described it.
 - **notes**: what the message must say. Keep it to the user's content; don't add points.
 - **subject** for a new email, if given.
 

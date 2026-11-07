@@ -107,16 +107,19 @@ def format_examples(recs, register, start=1):
     out = []
     for k, r in enumerate(recs):
         ctx = (r.get("context") or "").strip()
-        lab = "I wrote" if register in ("doc", "prompt") else "I sent"
+        lab = "I wrote" if register in ("doc", "prompt") else ("I posted" if register == "post" else "I sent")
         if r.get("register") == "prompt" and register != "prompt":
             lab = "I wrote (to an AI assistant)"
+        elif r.get("register") == "post" and register != "post":
+            lab = "I posted (on a public forum)"
         head = "Example %d" % (start + k)
         if r.get("recipient") and register in ("chat", "email"):
             head += " (to %s)" % r["recipient"]
         if r.get("subject"):
             head += " [subject: %s]" % r["subject"]
-        if ctx and register in ("chat", "email"):
-            out.append("%s\nThey said: %s\n%s: %s" % (head, ctx, lab, r["text"]))
+        if ctx and register in ("chat", "email", "post"):
+            said = "They posted" if r.get("register") == "post" else "They said"
+            out.append("%s\n%s: %s\n%s: %s" % (head, said, ctx, lab, r["text"]))
         else:
             out.append("%s\n%s: %s" % (head, lab, r["text"]))
     return "\n\n".join(out)

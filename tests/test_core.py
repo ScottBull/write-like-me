@@ -351,6 +351,31 @@ class TestBuildCompose(TempPack):
         rs, ru = compose.revise_prompt(kit, "draft text", "No clear tells.", [])
         self.assertIn("No clear tells.", ru)
 
+    def test_post_register_and_prose_supplement(self):
+        topics = ["the inverter", "panel tilt", "battery sizing", "the charge controller", "grounding"]
+        recs = [make_record("reddit", "post", "I went with %s in the end. It was probably overkill for a "
+                            "small cabin, but it's been solid for %d months." % (topics[i % 5], i + 2),
+                            rid="post%d" % i, thread="t%d" % i, context="what did you end up using?")
+                for i in range(45)]
+        recs += [make_record("x", "email", "Thursday works for the review, I'll bring the deck %d." % i,
+                             rid="mail%d" % i, recipient="Dana") for i in range(6)]
+        with open(os.path.join(self.pack, "sources", "more.jsonl"), "w") as f:
+            f.write("\n".join(json.dumps(r) for r in recs) + "\n")
+        stats = build.build(self.pack)
+        self.assertEqual(stats["registers"]["post"]["n"], 45)
+        s, bank, rtext = build.load_pack(self.pack)
+        kit = compose.build_kit(bank, s, rtext, "", "post", "used a bigger battery; would size up again",
+                                context="what battery did you go with?")
+        self.assertIn("Post or comment I'm replying to", kit["user"])
+        self.assertIn("They posted: what did you end up using?", kit["user"])
+        self.assertIn("I posted: ", kit["user"])
+        # a thin email register borrows public posts (the person's longer prose) ...
+        kit = compose.build_kit(bank, s, rtext, "", "email", "review moved to Friday", recipient="Dana")
+        self.assertIn("I posted (on a public forum): ", kit["user"])
+        # ... but chat, with plenty of its own samples, borrows nothing
+        kit = compose.build_kit(bank, s, rtext, "", "chat", "yes still on", context="is the demo still on")
+        self.assertNotIn("I posted", kit["user"])
+
     def test_rebuild_keeps_user_rules(self):
         build.build(self.pack)
         rp = os.path.join(self.pack, "rules.md")

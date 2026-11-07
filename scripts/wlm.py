@@ -185,8 +185,9 @@ def cmd_kit(a):
     reg = a.register
     have = list((stats.get("registers") or {}).keys())
     if reg not in have:
-        order = {"chat": ["email", "doc", "prompt"], "email": ["chat", "doc", "prompt"],
-                 "doc": ["email", "chat", "prompt"], "prompt": ["chat", "email", "doc"]}[reg]
+        order = {"chat": ["email", "post", "doc", "prompt"], "email": ["chat", "post", "doc", "prompt"],
+                 "doc": ["post", "email", "chat", "prompt"], "prompt": ["chat", "email", "post", "doc"],
+                 "post": ["doc", "chat", "email", "prompt"]}[reg]
         alt = next((r for r in order if r in have), None)
         if not alt:
             sys.exit("the pack has no samples at all; run voice-setup")

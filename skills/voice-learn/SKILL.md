@@ -11,7 +11,7 @@ The user's own edits are the best source of new rules. The CLI is `python3 -I ${
 
 Only the read-only commands (`learn diff`, `status`) are pre-approved. The commands that write (`learn note`, `learn rule`, `learn add`, `build`) deliberately trigger Claude Code's permission prompt even after the user has agreed in chat. When you get to step 5, tell the user in one line that they'll see a permission prompt for each write and should approve it.
 
-1. **Get both versions.** The sent text comes from the user. The draft is the last one you produced in this conversation, or the last logged one (`<pack>/drafts.jsonl`, used automatically when `--draft-file` is omitted). Confirm the register (chat / email / doc / prompt) and recipient. Write both texts to temp files inside `<pack>/work/` (the private pack folder; `wlm status` prints its path), never in the user's project folder.
+1. **Get both versions.** The sent text comes from the user. The draft is the last one you produced in this conversation, or the last logged one (`<pack>/drafts.jsonl`, used automatically when `--draft-file` is omitted). Confirm the register (chat / email / doc / post / prompt) and recipient. Write both texts to temp files inside `<pack>/work/` (the private pack folder; `wlm status` prints its path), never in the user's project folder.
 
 2. **Diff:** `wlm learn diff --register <reg> --draft-file <draft.txt> --sent-file <sent.txt>`. It shows word-level edits, which habits changed (added/removed exclamation, greeting, final punctuation...), AI-isms removed, length change, and numbered proposals.
 
