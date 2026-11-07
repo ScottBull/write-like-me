@@ -6,6 +6,53 @@ It builds a local **voice pack**, which is an archive of your own messages in da
 
 Built for Claude Code (the CLI). The core scripts only use the Python 3.9+ standard library.
 
+## What it looks like
+
+Same question, three answers: "What's the best way to get rid of fruit flies in my kitchen?" The two voice answers come from the same person's archive in two registers, so they're different lengths and shapes, the way the author's real Teams messages and Reddit comments are.
+
+**Plain Claude:** 328 words, with bold numbered headings and bullets.
+
+<details><summary>Show the plain Claude answer</summary>
+
+> The quickest fix is to get rid of what they're breeding in. Traps catch the adults, but more will keep hatching until the source is gone.
+>
+> **1. Find and remove the source**
+> - Throw out or refrigerate overripe fruit and vegetables. Check potatoes and onions for any that have gone soft or are rotting.
+> - Take out the trash and recycling, and rinse bottles, cans and the bin itself.
+> - Clean sink drains and the garbage disposal. Fruit flies often breed in the gunk inside. Pour boiling water down the drain, or use baking soda followed by vinegar, then scrub with a drain brush.
+> - Look for hidden spots: spills under the fridge or stove, damp sponges and mops, pet food bowls, and houseplant soil that stays wet.
+>
+> **2. Trap the adults**
+> - **Vinegar trap:** Put apple cider vinegar in a small jar with a drop of dish soap, which breaks the surface tension so the flies sink. Leave it open, or cover it with plastic wrap and poke a few small holes in it.
+> - **Wine or beer trap:** A little leftover red wine or beer in a bottle works well too.
+> - **Fruit trap:** Put a piece of overripe banana in a jar with a paper funnel in the top. Flies get in but can't find their way out.
+> - Put traps where you see the most flies and refresh them every few days.
+>
+> **3. Keep them from coming back**
+> - Wash produce when you bring it home, since eggs often come in on fruit.
+> - Store ripe fruit in the fridge.
+> - Wipe counters and empty the trash often, especially in warm weather.
+>
+> If you clear out the source and keep traps going, you should be fly-free in about a week. Their life cycle is roughly 8 to 10 days, so a few stragglers may show up before then. If they keep coming back, look for a drain or a piece of produce you missed.
+
+</details>
+
+**In the author's Teams voice** (a coworker asked, and the draft saw about 100 of his Teams messages), 47 words:
+
+> Apple cider vinegar in a small cup with a drop of dish soap, then cover it with plastic wrap and poke a few holes in the top. Works surprisingly well. Also worth checking for any overripe fruit or the sink drain, that's usually where they're coming from.
+
+**In the author's Reddit voice** (a reply to a Reddit post asking the same thing, from about 66 of his Reddit comments), 140 words:
+
+> Apple cider vinegar trap works great. Small cup of ACV, a drop or two of dish soap to break the surface tension, and cover it with plastic wrap with a few small holes poked in it. They go in and can't get back out.
+>
+> But the trap only handles the adults, you'll want to find the source or they'll just keep coming back. Usual suspects are overripe fruit on the counter, the trash or compost bin, and the sink drain. Drains are the one people miss most often. Try pouring boiling water down it followed by some baking soda and vinegar, or tape a clear plastic bag over the drain overnight and see if anything's in it by morning.
+>
+> Once the source is gone and the trap is out, they should be pretty much gone within a week or so.
+
+To get one yourself: `/write-like-me:write-as-me reply to this: any tips for getting rid of fruit flies?`
+
+Each of these is a single sample from one author's pack, so your own pack gives you your own voice, and a re-run comes out somewhat different.
+
 ## Install
 
 In Claude Code:
