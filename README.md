@@ -1,10 +1,10 @@
 # write-like-me
 
-A Claude Code plugin that learns how **you** write from text you've actually sent, then drafts chat replies, emails, posts and docs that sound like you instead of like an AI assistant.
+A Claude Code plugin that learns how **you** write from text you’ve actually sent, then drafts chat replies, emails, posts and docs that sound like you and not like an AI assistant.
 
-It builds a local **voice pack**: an archive of your own messages, each with what it replied to, in date order. When you ask Claude to "reply to Dana saying Thursday works", the plugin picks 60-100 of those messages (a 10,000-token budget, chosen to cover different people, lengths and years), shows them to the model as *"this is my archive; write the next entry"*, and makes one call. There are no style rules in the prompt, no critic and no rewrite. A short lint checks the few things you never do (a dash, a sign-off, a phrase you'd never use), and you get back just the text.
+It builds a local **voice pack**, which is an archive of your own messages in date order, each one paired with what it was replying to. When you ask Claude to “reply to Dana saying Thursday works”, the plugin picks 60-100 of those messages (a 10,000-token budget, chosen to cover different people, lengths and years), shows them to the model as *"this is my archive; write the next entry"*, and makes a single call. No style rules in the prompt, no critic, no rewrite. A short lint checks for the handful of things you never do (a dash, a sign-off, a phrase you’d never use), and you get back just the text.
 
-Built for Claude Code (the CLI). Core scripts are Python 3.9+ standard library only.
+Built for Claude Code (the CLI). The core scripts only use the Python 3.9+ standard library.
 
 ## Install
 
@@ -17,25 +17,25 @@ In Claude Code:
 
 Then restart Claude Code or run `/reload-plugins`.
 
-**Upgrading from 0.1:** run `/write-like-me:voice-setup` (or `wlm build`) once. It rebuilds the pack in the new archive format from your extracted sources and keeps your own rules, learned notes and logged drafts. `wlm status` tells you when a pack needs this.
+**Upgrading from 0.1:** Run `/write-like-me:voice-setup` (or `wlm build`) once. It rebuilds your pack in the new archive format from your extracted sources, and keeps your own rules, learned notes and logged drafts. `wlm status` will let you know when a pack needs this.
 
 ## Quickstart
 
-1. **Build your voice pack** (once, about 5 minutes):
+1. **Build your voice pack** (one time, takes about 5 minutes):
    ```
    /write-like-me:voice-setup
    ```
-   Claude looks for writing sources on your machine, asks before using each one, extracts only what you sent, and tells you in plain words how much of it each draft will see ("about 100 of your chat messages").
+   Claude looks for writing sources on your machine and asks before using each one. It only extracts what you sent, and tells you in plain terms how much of it each draft will see (“about 100 of your chat messages”).
 
 2. **Draft something:**
    ```
    /write-like-me:write-as-me reply to Dana: Thursday works, I'll bring the slides
    ```
-   or just say "write this in my voice: ..." or "draft an email to the team about ...". The draft runs in a `voice-writer` subagent, so your archive never lands in your main conversation.
+   Or just say “write this in my voice: ...” or “draft an email to the team about ...”. Drafting happens in a `voice-writer` subagent, so your archive never ends up in your main conversation.
 
-3. **Teach it** when you edit a draft before sending: paste what you actually sent and say "here's what I sent" (or run `/write-like-me:voice-learn`). It proposes, with your OK, adding the sent message to the archive (the strongest fix), a soft note, or a hard rule.
+3. **Teach it** when you edit a draft before sending. Paste what you actually sent and say “here’s what I sent” (or run `/write-like-me:voice-learn`). It’ll propose one of three things, and only with your OK: adding the sent message to the archive (the strongest fix), a soft note, or a hard rule.
 
-4. **Optional, test it:** `/write-like-me:voice-check` holds out some of your real messages, has the plugin rewrite each one from a content-only summary, and gives you a blind-test page: pairs (pick your real message) and lineups (four messages, three yours: spot the one you didn't write). Pages built from the repo's synthetic test fixtures carry a yellow **DEMO** banner.
+4. **Optional, test it:** `/write-like-me:voice-check` holds out some of your real messages and has the plugin rewrite each one from a summary of just the content. Then it gives you a blind test page with pairs (pick your real message) and lineups (four messages, three are yours, spot the one you didn’t write). Any page built from the repo’s synthetic test fixtures gets a yellow **DEMO** banner.
 
 ## Sources
 
@@ -48,17 +48,17 @@ Then restart Claude Code or run `/reload-plugins`.
 | Pasted samples | any | any | Paste messages into the chat. Public posts and comments (Reddit, forums) go in as register `post`. |
 | iMessage via [imessage-exporter](https://github.com/ReagentX/imessage-exporter) | chat | macOS | Optional. Needs `brew install imessage-exporter` and Full Disk Access for your terminal. |
 
-Drafts use the archive of the register you're writing in. A register with no samples borrows the closest one and says so (documents borrow your posts). **More samples help most where you have few:** with a couple of dozen emails, email drafts lean on generic email habits.
+Each draft uses the archive for the register you’re writing in. If a register has no samples, it borrows the closest one and tells you (documents borrow from your posts). **More samples help most where you have the fewest.** If you only have a couple dozen emails, email drafts end up leaning on generic email habits.
 
 ## Privacy model
 
-- **Everything stays local.** The pack lives in `~/.claude/voice-pack/` (or `$WRITE_LIKE_ME_PACK`), with every folder 0700 and every file 0600. Extraction and `build` make no network calls, and the plugin uploads, commits or syncs nothing. Email addresses and phone numbers are masked in the archive by default.
-- **Only your own sent text** goes in the pack. Quoted replies, forwards, signatures and other people's messages are stripped; the message you replied to is kept as a short excerpt so entries make sense.
-- **What a draft sends to the model:** about 10,000 tokens of your real messages, any `learned.md` notes for that register and recipient, and your notes for the new message. It goes to whatever model and account your Claude Code uses, like anything else you paste into Claude Code. The `wlm draft` fallback and `voice-check` call your own `claude` login with the prompt on stdin, never the command line; the child process never sees `ANTHROPIC_API_KEY`, so calls stay on your Claude Code login (set `WRITE_LIKE_ME_KEEP_API_KEY=1` if your Claude Code itself runs on an API key).
-- **`voice-check`** sends the held-out messages (to summarise them), one draft call and one plain baseline per held-out message, and, for the optional LLM judge, the held-out and generated messages. `prepare` prints the number of calls first.
-- **The optional person file** (below) is a profile of you on disk, built by model calls over the sources you choose, in ~40k-token chunks, after a dry run that shows the number of calls.
-- **Workplace data:** Teams, Outlook and work documents belong to your employer. Check your employer's policy on using work messages with AI tools before using those sources. Setup reminds you and asks first.
-- **To delete everything:** remove the pack folder.
+- **Everything stays local.** The pack lives in `~/.claude/voice-pack/` (or `$WRITE_LIKE_ME_PACK`). Every folder is 0700 and every file is 0600. Extraction and `build` don’t make any network calls, and the plugin never uploads, commits or syncs anything. Email addresses and phone numbers are masked in the archive by default.
+- **Only text you sent yourself** goes in the pack. Quoted replies, forwards, signatures and other people’s messages all get stripped out. The message you were replying to is kept as a short excerpt so each entry still makes sense.
+- **What a draft sends to the model:** about 10,000 tokens of your real messages, any `learned.md` notes for that register and recipient, and your notes for the new message. That goes to whatever model and account your Claude Code uses, same as anything else you paste into Claude Code. The `wlm draft` fallback and `voice-check` call your own `claude` login with the prompt on stdin, never on the command line. The child process never sees `ANTHROPIC_API_KEY`, so calls stay on your Claude Code login (set `WRITE_LIKE_ME_KEEP_API_KEY=1` if your Claude Code itself runs on an API key).
+- **`voice-check`** sends the held-out messages (to summarise them), one draft call and one plain baseline per held-out message, and, if you use the optional LLM judge, the held-out and generated messages. `prepare` prints how many calls it’ll make before it starts.
+- **The optional person file** (below) is a profile of you saved on disk. It’s built by model calls over the sources you pick, in ~40k-token chunks, after a dry run that shows you the number of calls.
+- **Workplace data:** Teams, Outlook and work documents belong to your employer. Check your employer’s policy on using work messages with AI tools before using any of those sources. Setup will remind you and ask first.
+- **To delete everything:** just remove the pack folder.
 
 ## How it works
 
@@ -82,18 +82,18 @@ voice-check   hold out real messages -> briefs -> scripted drafts -> pairs + lin
 | `drafts.jsonl` | your final drafts, for lint's overuse counter and for voice-learn |
 | `person.md`, `person.work.md` | optional person file (below) |
 
-**Why it works this way** (details in [docs/research.md](docs/research.md)):
+**Why it works this way** (more detail in [docs/research.md](docs/research.md)):
 
-- **The archive, not rules.** Version 0.1 was a lint: a few examples, counted habits stated as frequencies, a critic and a rewrite. It won on what you can count (dashes, openers, length) and missed the texture of the prose, which is most of what makes writing recognisably yours. Showing the model a large slice of your own writing as an archive to continue roughly tripled the style scores on long-form writing.
-- **Less is more.** 5-10k tokens of archive beat 25k, 50k and the whole archive (257k). Past about 10k, extra writing made drafts more average, not more like the person. The default selection covers different recipients, lengths and years, and cuts the replied-to text short so more of your own messages fit.
-- **One call.** The 0.1 critique-and-revise step cut 4-9% of the points a draft was asked to make and trimmed long drafts. Drafts now keep their content.
-- **No deliberate imperfection.** Real messages have typos and doubled words. The plugin never adds them.
+- **The archive, not rules.** Version 0.1 was basically a lint: a few examples, counted habits written out as frequencies, a critic and a rewrite. It did well on the stuff you can count (dashes, openers, length) but missed the texture of the writing, which is most of what makes it recognisably yours. Showing the model a big slice of your own writing as an archive to continue roughly tripled the style scores on long-form writing.
+- **Less is more.** 5-10k tokens of archive beat 25k, 50k and even the whole archive (257k). Past about 10k, adding more writing made drafts more average, not more like the person. The default selection covers different recipients, lengths and years, and trims the replied-to text short so more of your own messages fit.
+- **One call.** The critique-and-revise step in 0.1 dropped 4-9% of the points a draft was supposed to make and trimmed down long drafts. Now drafts keep their content.
+- **No deliberate imperfection.** Real messages have typos and doubled words. The plugin never adds them in.
 
-**Optional extras, off by default** because neither helped in testing: a **person file** (`wlm person build`: a cited description of what you know, do and think, with `show` / `add` / `forget` to read and prune it; turn it on per draft with `--person core`), and a **habits note** (`--habits on`: your measured frequencies, such as typical length and how often you skip a final period).
+**Optional extras, off by default** since neither helped in testing: a **person file** (`wlm person build`, a cited description of what you know, do and think, with `show` / `add` / `forget` to read and prune it; turn it on per draft with `--person core`), and a **habits note** (`--habits on`, your measured frequencies, like typical length and how often you skip the final period).
 
 ## Results
 
-One author's own held-out messages, Claude Opus 5.5; aggregates only, no message text is in this repository. Methods and full tables: [docs/research.md](docs/research.md).
+These are from one author’s own held-out messages, using Claude Opus 5.5. Aggregates only, and none of the message text is in this repository. Methods and full tables are in [docs/research.md](docs/research.md).
 
 | | style match, Reddit comments (0 = other people, 1 = the author) | judge spots the draft in a lineup (chance 25%) |
 |---|---|---|
@@ -101,14 +101,14 @@ One author's own held-out messages, Claude Opus 5.5; aggregates only, no message
 | 0.1 (examples + rules + critic) | 0.33 | Reddit 50%, Teams 38% |
 | **0.2 (archive, 10k tokens)** | **0.90** | **Reddit 40%, Teams 32%** |
 
-- **Long-form writing is where 0.2 is a clear step up.** On short work chat it is level with 0.1 within noise; 0.1's rules still win on small surface habits like leaving off the final period.
-- **Paired judges still catch long text by its polish:** shown the real comment beside the draft, they pick the real one almost every time, mostly citing typos and roughness the plugin never adds. The lineup test is closer to how a reader meets a message, and it is what `voice-check` reports.
+- **Long-form writing is where 0.2 is a clear step up.** On short work chat it’s even with 0.1 within noise, and 0.1’s rules still win on small surface habits like leaving off the final period.
+- **Paired judges still catch long text by how polished it is.** When they’re shown the real comment next to the draft, they pick the real one almost every time, mostly pointing to typos and roughness that the plugin never adds. The lineup test is closer to how a reader actually comes across a message, so that’s what `voice-check` reports.
 
-One author and a few registers is a small sample, so expect your mileage to vary. Use `/write-like-me:voice-check` to measure your own.
+One author and a few registers is a pretty small sample, so your mileage may vary. Use `/write-like-me:voice-check` to measure your own.
 
 ## Commands reference
 
-The skills drive a single CLI, which you can also run yourself:
+All the skills run through a single CLI, which you can also run yourself:
 
 ```
 python3 -I ~/.claude/plugins/.../write-like-me/scripts/wlm.py --help
