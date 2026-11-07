@@ -131,6 +131,43 @@ The archive carries layers 1 and 2 by example and layer 3 only by implication. T
 
 P cells (person-file core of about 3k tokens + D for the rest): detect / LUAR bundle 0.95 / 0.40 at 5k, 0.90 / 0.62 at 10k, 0.82 / 0.49 at 25k, below D and C at every budget. The tokens the file takes buy less than the same tokens of real messages. `person_default` is therefore `none`. The thin-notes track was not run for 0.2.0, because the P cells already decided the default; it is the measurement to run before turning the person file on for drafts whose notes are thin.
 
+## Restyle: rewriting Claude's answer in the person's voice
+
+A common request is to paste an answer Claude already wrote and ask for it "in my voice". This was tested on 40 held-out items (20 Teams replies, register chat; 20 Reddit comments, register post): one fresh assistant answer per item (the message replied to plus the brief, "write the reply for them as a helpful assistant would"), the plugin's 0.2 defaults, two samples per condition, the codex judge on sample 1. The conditions: R-DIRECT ("Rewrite this in my own words, the way I would write it myself. Keep the useful content." and the answer), R-SHORT (a line saying where the reply goes, then "Below is an AI-written answer with more detail than I would send. Reply the way I actually would: as long as I would really write it, keeping only what I would bother to mention. Don't add anything that isn't in it." and the answer), R-POINTS (R-SHORT's wording over terse points taken from the answer instead of the answer itself), R-FRESH (where it goes, no answer and no brief), NEWNH (a normal 0.2 draft from the person's own brief) and ANSWER (the assistant answer as is). The natural answers were short and plain (Teams median 48.5 words, 2.1x the real message, no markdown; Reddit median 89, 1.7x), which limits how much a scope instruction can cut.
+
+Teams (chat), 20 items:
+
+| cond | lineup spotted (codex, chance 25%) | paired fooled | LUAR detect | LUAR bundle | stylo norm | length ratio | median words | brief points kept | msgs keeping all | 4-gram share of answer | 8-word runs / msg |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| R-DIRECT | 80% [65-90] | 0% | 1.00 | 0.87 | 0.66 | 1.67 | 38.5 | 94% | 90% | 35% | 0.95 |
+| R-SHORT | **60% [45-74]** | 2% | 0.93 | 0.96 | 0.73 | 1.35 | 29.0 | 89% (s1 91%, s2 86%) | 75% | 32% | 0.65 |
+| R-POINTS | 82% [68-91] | 2% | 0.97 | 0.99 | 0.68 | 1.67 | 36.5 | 91% | 80% | 18% | 0.65 |
+| R-FRESH | 82% [68-91] | 2% | 0.77 | 1.06 | 0.69 | 0.55 | 14.5 | 11% (guess rate) | 2% | n/a | n/a |
+| NEWNH (from brief) | 42% [29-58] | 15% | 0.68 | 0.87 | 0.89 | 1.13 | 26.0 | 100% | 100% | 24% | 0.55 |
+| ANSWER | | | 1.00 | 0.06 | -0.55 | 2.28 | 48.5 | 100% | 100% | 100% | 1.00 |
+| (real) | | | | | | 1.00 | 23.5 | | | | |
+
+Reddit (post), 20 items:
+
+| cond | lineup spotted (codex, chance 25%) | paired fooled | LUAR detect | LUAR bundle | stylo norm | length ratio | median words | brief points kept | msgs keeping all | 4-gram share of answer | 8-word runs / msg |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| R-DIRECT | **75% [60-86]** | 2% | 0.85 | 0.83 | -0.08 | 1.36 | 89.5 | 99% | 92% | 39% | 3.15 |
+| R-SHORT | 78% [62-88] | 0% | 0.90 | 0.69 | 0.38 | 1.20 | 73.5 | 96% | 80% | 41% | 2.58 |
+| R-POINTS | 85% [71-93] | 0% | 0.88 | 0.63 | 0.19 | 1.26 | 79.0 | 97% | 80% | 23% | 1.55 |
+| R-FRESH | 95% [83-99] | 0% | 0.95 | 0.56 | 0.90 | 0.91 | 50.0 | 10% (guess rate) | 0% | n/a | n/a |
+| NEWNH (from brief) | 38% [24-53] | 0% | 0.78 | 0.90 | 0.73 | 1.05 | 55.0 | 100% | 100% | 19% | 0.88 |
+| ANSWER | | | 1.00 | -0.44 | -0.43 | 1.39 | 89.0 | 99% | 95% | 100% | 1.00 |
+| (real) | | | | | | 1.00 | 52.0 | | | | |
+
+Lineup and paired n = 40; LUAR detect 0.5 = indistinguishable; brief points kept is points-weighted (Teams 132 points, Reddit 274); the 4-gram share and 8-word runs are measured against the answer, so NEWNH's row is the floor the shared brief produces.
+
+- **Every restyle is spotted about twice as often as a draft from the brief:** 60-82% (Teams) and 75-85% (Reddit) in the lineup, against 42% and 38%.
+- **It isn't the wording.** R-POINTS cut the 4-gram share to near NEWNH's floor and was spotted the most. What gives a restyle away is probably Claude's choice of content and how much of it there is.
+- **The scope wording helps on chat.** R-SHORT was 20 points better than R-DIRECT on the Teams lineup, the only clear gain, with the shortest output (1.35x), and kept 89% of the brief's points there (96% on Reddit, where it was level with R-DIRECT). Pooled over both domains it was spotted least (69% vs R-DIRECT's 78%) and kept 93% of the points. Every other gap sits inside overlapping intervals. The pre-set rule (lowest lineup rate among arms keeping at least 90% of the points, per domain) picked R-DIRECT, because R-SHORT missed the Teams floor by about a point; the plugin uses R-SHORT for its Teams gain, its shorter output and its pooled result.
+- **R-FRESH does worst** (Teams 82%, Reddit 95%) and guesses only 10-11% of the points: knowing what the person meant to say helps the style as well as the content.
+
+**In the plugin:** `wlm context --restyle-file F` builds the notes from pasted text with R-SHORT's wording by default (`--keep mine`; the opening line names the register, the recipient and, when the archive comes from one platform, the platform), R-DIRECT's with `--keep all`, and `--point TEXT` puts "The point I want to make: TEXT" before the pasted text. Since no restyle came near a draft from the person's own brief, the command always prints a tip saying so, and the skill passes it on.
+
 ## How the plugin maps to this
 
 | finding | plugin feature |
@@ -143,4 +180,5 @@ P cells (person-file core of about 3k tokens + D for the rest): detect / LUAR bu
 | the paired judge rewards typos | `voice-check` reports lineup spotted rates and tags reasons polish or voice |
 | learn from edits | `voice-learn` proposes adding the sent message to the archive, a person-file claim, a note or a hard rule |
 | a 250k-token call per message is too much | the budget ablation; defaults in `stats.json`, overridable per draft |
+| restyling Claude's answer is spotted far more often than drafting from the person's own notes; content and amount give it away, not wording | `--restyle-file` uses the shortest measured wording (`--keep mine`) and always suggests adding the person's own point (`--point`) |
 | privacy | everything local; drafts run in a subagent or a `claude -p` child with the archive as a system-prompt file and no API key in its environment |

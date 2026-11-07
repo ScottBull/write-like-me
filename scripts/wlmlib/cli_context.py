@@ -1,6 +1,7 @@
 """`wlm context`: select archive entries within the budget and write the draft's context files.
 
-    wlm context --register R [--budget N] [--strategy D] [--notes ...|--notes-file F]
+    wlm context --register R [--budget N] [--strategy D]
+                [--notes ...|--notes-file F|--restyle-file F [--keep mine|all] [--point TEXT]]
                 [--context ...|--context-file F] [--recipient X] [--subject S]
                 [--person core|full|none] [--habits on|off] [--seed N]
 
@@ -19,6 +20,14 @@ Habits block (habits.py): when on, a few measured habits of the archive's regist
 (length, open endings, acknowledgment openers, "!" and hedges, never-used marks already in rules.md),
 phrased as frequencies over many messages, go after the learned notes under "How my messages vary".
 It is dropped, with a note, when it does not fit the budget beside the learned notes.
+
+Restyle (--restyle-file): the notes are built from pasted text (usually an answer Claude already
+wrote) with the wording measured in the restyle test (docs/research.md, "Restyle"). `--keep mine`,
+the default, is R-SHORT: a line saying who the reply is to and where (register, recipient, the
+archive's platform), then "Below is an AI-written answer with more detail than I would send. ...".
+`--keep all` is R-DIRECT: "Rewrite this in my own words, ... Keep the useful content." `--point`
+puts "The point I want to make: TEXT" before the pasted text. Restyles were spotted more often than
+drafts from the user's own notes, so the command always prints a one-line tip saying so.
 
 Learned notes: the blocks of <pack>/learned.md that apply to this register and recipient
 (compose.learned_for, what `wlm learn note` writes) go after the archive as a short "notes from my
@@ -54,6 +63,52 @@ KEEP_DIRS = 30
 FALLBACK = {"chat": ["email", "post", "doc", "prompt"], "email": ["chat", "post", "doc", "prompt"],
             "doc": ["post", "email", "chat", "prompt"], "prompt": ["chat", "email", "post", "doc"],
             "post": ["doc", "chat", "email", "prompt"]}
+
+
+# Restyle wordings, verbatim from the restyle test (R-SHORT for "mine", R-DIRECT for "all").
+RESTYLE_SHORT = ("Below is an AI-written answer with more detail than I would send. Reply the way I actually would: "
+                 "as long as I would really write it, keeping only what I would bother to mention. "
+                 "Don't add anything that isn't in it.")
+RESTYLE_ALL = "Rewrite this in my own words, the way I would write it myself. Keep the useful content."
+RESTYLE_TIP = ("Tip: drafts from your own one-line point sound most like you; "
+               "add --point '<what you want to say>' or use --notes.")
+KEEP_CHOICES = ("mine", "all")
+# An archive whose entries all come from one of these sources names the platform in the framing.
+PLATFORMS = {"teams": "Teams", "imessage": "iMessage", "reddit": "Reddit"}
+
+
+def _platform(pack, register):
+    """The platform name when every archive entry of the register comes from one known source, else ''."""
+    srcs = {e.get("source") for e in read_jsonl(archive_path(pack, register))}
+    return PLATFORMS.get(srcs.pop(), "") if len(srcs) == 1 else ""
+
+
+def restyle_where(register, recipient="", subject="", platform=""):
+    """The R-SHORT opening line: who the reply goes to and where ("This is a Teams chat reply to Dana.")."""
+    to = recipient.strip()
+    if register == "chat":
+        kind = (platform + " chat") if platform else "chat"
+        return "This is a %s reply to %s." % (kind, to or ("a coworker" if platform == "Teams" else "someone"))
+    if register == "post":
+        kind = (platform + " reply") if platform else "reply to a public post"
+        return "This is a %s%s." % (kind, (" in " + to) if to else "")
+    if register == "email":
+        return "This is an email to %s%s." % (to or "someone", (" about " + subject.strip()) if subject.strip() else "")
+    if register == "doc":
+        return "This is a document%s." % ((" for " + to) if to else "")
+    return "This is a prompt to an AI assistant."
+
+
+def restyle_notes(text, register, keep="mine", recipient="", subject="", point="", platform=""):
+    """The draft's notes for restyling `text`: the measured framing, the optional point, then the text."""
+    if keep not in KEEP_CHOICES:
+        raise ValueError("unknown --keep %r" % keep)
+    head = RESTYLE_ALL if keep == "all" else restyle_where(register, recipient, subject, platform) + " " + RESTYLE_SHORT
+    parts = [head]
+    if (point or "").strip():
+        parts.append("The point I want to make: " + point.strip())
+    parts.append(text.strip())
+    return "\n\n".join(parts)
 
 
 def _read(path_or_none, text_or_none):
@@ -159,7 +214,7 @@ def _prune(base):
 
 
 def build_context(pack, register, notes, context="", recipient="", subject="", budget=None,
-                  strategy=None, person=None, seed=0, today=None, habits=None):
+                  strategy=None, person=None, seed=0, today=None, habits=None, restyle=None):
     """Select, assemble and write. Returns a dict of paths and counts (no message text)."""
     stats = read_json(os.path.join(pack, "stats.json"), {}) or {}
     d_budget, d_strategy = defaults(stats)
@@ -222,7 +277,7 @@ def build_context(pack, register, notes, context="", recipient="", subject="", b
             "person_tokens": p_tok, "learned_tokens": l_tok,
             "habits": "on" if habits_text else "off", "habits_tokens": h_tok, "tokens": a_tok + p_tok + l_tok + h_tok,
             "system_tokens": S.est_tokens(len(system)), "ids": [e.get("id") for e in picked],
-            "notes": notes_out}
+            "restyle": restyle, "notes": notes_out}
     write_json(os.path.join(d, "context.json"), info)
     _prune(base)
     return info
@@ -232,13 +287,26 @@ def cmd_context(a):
     pack = pack_dir()
     if not os.path.exists(os.path.join(pack, "stats.json")):
         sys.exit("No voice pack at %s. Run /write-like-me:voice-setup first." % pack)
-    notes = _read(a.notes_file, a.notes).strip()
-    if not notes:
-        sys.exit("give the notes for the message (--notes or --notes-file)")
+    restyle = None
+    if a.restyle_file:
+        text = _read(a.restyle_file, None).strip()
+        if not text:
+            sys.exit("the --restyle-file is empty")
+        restyle = a.keep or "mine"
+        platform = _platform(pack, a.register) if has_archive(pack) else ""
+        notes = restyle_notes(text, a.register, restyle, recipient=a.recipient or "", subject=a.subject or "",
+                              point=a.point or "", platform=platform)
+    else:
+        if a.keep or a.point:
+            sys.exit("--keep and --point go with --restyle-file")
+        notes = _read(a.notes_file, a.notes).strip()
+        if not notes:
+            sys.exit("give the notes for the message (--notes, --notes-file or --restyle-file)")
     try:
         info = build_context(pack, a.register, notes, context=_read(a.context_file, a.context).strip(),
                              recipient=a.recipient or "", subject=a.subject or "", budget=a.budget,
-                             strategy=a.strategy, person=a.person, seed=a.seed, habits=a.habits)
+                             strategy=a.strategy, person=a.person, seed=a.seed, habits=a.habits,
+                             restyle=restyle)
     except ValueError as e:
         sys.exit(str(e))
     for n in info["notes"]:
@@ -255,6 +323,9 @@ def cmd_context(a):
         print("person file: none")
     else:
         print("person file: %s (%s)" % (info["person"], ", ".join(info["person_files"])))
+    if restyle:
+        print("restyle: keep %s%s" % (restyle, ", with your point" if (a.point or "").strip() else ""))
+        print(RESTYLE_TIP)
 
 
 def add_parser(sp):
@@ -267,6 +338,12 @@ def add_parser(sp):
     g = p.add_mutually_exclusive_group()
     g.add_argument("--notes")
     g.add_argument("--notes-file")
+    g.add_argument("--restyle-file", help="text to rewrite in your voice (often an answer Claude wrote); "
+                                          "builds the notes from it")
+    p.add_argument("--keep", choices=KEEP_CHOICES,
+                   help="with --restyle-file: mine (default) keeps only what you'd bother to mention, "
+                        "at your length; all keeps the useful content")
+    p.add_argument("--point", help="with --restyle-file: the point you want to make, put before the pasted text")
     g = p.add_mutually_exclusive_group()
     g.add_argument("--context")
     g.add_argument("--context-file")

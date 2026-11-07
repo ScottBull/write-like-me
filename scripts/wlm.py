@@ -11,7 +11,7 @@ Commands (all data stays in the voice pack: $WRITE_LIKE_ME_PACK or ~/.claude/voi
   build                            clean + measure + write archive/, profile.md, rules.md, stats.json
   status                           what's in the pack (counts only), its format version and defaults
   context --register R --notes ... select archive entries within the budget; write the draft's
-                                   system file and task file
+                                   system file and task file (--restyle-file F: rewrite pasted text)
   draft --system-file F --task-file T   one draft via `claude -p` (fallback when no subagent)
   lint --register R --file F       deterministic checks against the hard rules
   log-draft --register R --file F  remember a final draft (caricature tracking, voice-learn)

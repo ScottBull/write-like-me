@@ -227,5 +227,116 @@ class TestContextCommand(PackCase):
             CC.build_context(self.pack, "chat", "x")                    # nothing at all
 
 
+class TestRestyle(PackCase):
+    ANSWER = "Great question! Here are three ways to keep the invented quokka deck tidy:\n\n1. Trim it.\n2. Label it."
+
+    def task_text(self, out):
+        tp = [l.split(": ", 1)[1] for l in out.splitlines() if l.startswith("task: ")][0]
+        with open(tp, encoding="utf-8") as f:
+            return f.read()
+
+    def restyle_file(self, text=None):
+        p = os.path.join(self.pack, "work", "paste.txt")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(text if text is not None else self.ANSWER)
+        return p
+
+    def test_framing_per_register_and_recipient(self):
+        self.assertEqual(CC.restyle_where("chat", "Jordan Example", platform="Teams"),
+                         "This is a Teams chat reply to Jordan Example.")
+        self.assertEqual(CC.restyle_where("chat", platform="Teams"), "This is a Teams chat reply to a coworker.")
+        self.assertEqual(CC.restyle_where("chat", "Riley Sample"), "This is a chat reply to Riley Sample.")
+        self.assertEqual(CC.restyle_where("chat"), "This is a chat reply to someone.")
+        self.assertEqual(CC.restyle_where("post", "r/bikes", platform="Reddit"), "This is a Reddit reply in r/bikes.")
+        self.assertEqual(CC.restyle_where("post", "a cycling forum"), "This is a reply to a public post in a cycling forum.")
+        self.assertEqual(CC.restyle_where("email", "Dana Example", "Kettle budget"),
+                         "This is an email to Dana Example about Kettle budget.")
+        self.assertEqual(CC.restyle_where("email"), "This is an email to someone.")
+        self.assertEqual(CC.restyle_where("doc", "the team"), "This is a document for the team.")
+        self.assertEqual(CC.restyle_where("prompt"), "This is a prompt to an AI assistant.")
+
+    def test_platform_from_the_archive(self):
+        self.assertEqual(CC._platform(self.pack, "chat"), "")          # fixture source is "synthetic"
+        path = os.path.join(self.pack, "archive", "chat.jsonl")
+        rows = [dict(r, source="teams") for r in read_jsonl(path)]
+        write_jsonl(path, rows)
+        self.assertEqual(CC._platform(self.pack, "chat"), "Teams")
+        write_jsonl(path, rows[:-1] + [dict(rows[-1], source="imessage")])
+        self.assertEqual(CC._platform(self.pack, "chat"), "")          # mixed sources name no platform
+        self.assertEqual(CC._platform(self.pack, "post"), "")          # no archive at all
+        write_jsonl(path, rows)
+        out = self.run_cli("--register", "chat", "--recipient", "Jordan Example", "--restyle-file", self.restyle_file())
+        self.assertIn("This is a Teams chat reply to Jordan Example. " + CC.RESTYLE_SHORT, self.task_text(out))
+
+    def test_keep_mine_is_the_default(self):
+        out = self.run_cli("--register", "chat", "--recipient", "Jordan Example", "--restyle-file", self.restyle_file())
+        task = self.task_text(out)
+        self.assertIn("What I want to say (my notes, not my wording): This is a chat reply to Jordan Example. "
+                      "Below is an AI-written answer with more detail than I would send. Reply the way I actually "
+                      "would: as long as I would really write it, keeping only what I would bother to mention. "
+                      "Don't add anything that isn't in it.", " ".join(task.split()))
+        self.assertIn("1. Trim it.", task)
+        self.assertNotIn(CC.RESTYLE_ALL, task)
+        self.assertIn("restyle: keep mine\n", out)
+        tp = [l.split(": ", 1)[1] for l in out.splitlines() if l.startswith("task: ")][0]
+        info = read_json(os.path.join(os.path.dirname(tp), "context.json"))
+        self.assertEqual(info["restyle"], "mine")
+        self.assertNotIn("quokka", json.dumps(info))
+
+    def test_keep_all(self):
+        notes = CC.restyle_notes(self.ANSWER, "chat", "all", recipient="Jordan Example")
+        self.assertEqual(notes, "Rewrite this in my own words, the way I would write it myself. Keep the useful content."
+                         "\n\n" + self.ANSWER.strip())
+        out = self.run_cli("--register", "post", "--recipient", "r/bikes", "--keep", "all",
+                           "--restyle-file", self.restyle_file())
+        task = self.task_text(out)
+        self.assertIn(CC.RESTYLE_ALL, task)
+        self.assertNotIn("more detail than I would send", task)
+        self.assertIn("restyle: keep all", out)
+        with self.assertRaises(ValueError):
+            CC.restyle_notes(self.ANSWER, "chat", "some")
+
+    def test_point_goes_before_the_text(self):
+        notes = CC.restyle_notes(self.ANSWER, "email", recipient="Dana Example", point="  trim the deck first ")
+        head, point, body = notes.split("\n\n", 2)
+        self.assertEqual(head, "This is an email to Dana Example. " + CC.RESTYLE_SHORT)
+        self.assertEqual(point, "The point I want to make: trim the deck first")
+        self.assertEqual(body, self.ANSWER.strip())
+        self.assertNotIn("The point I want to make", CC.restyle_notes(self.ANSWER, "chat", point="  "))
+        out = self.run_cli("--register", "chat", "--point", "trim it first", "--restyle-file", self.restyle_file())
+        task = self.task_text(out)
+        self.assertLess(task.index("The point I want to make: trim it first"), task.index("Great question!"))
+        self.assertIn("restyle: keep mine, with your point", out)
+
+    def test_tip_printed_every_time(self):
+        for extra in ([], ["--keep", "all"], ["--point", "trim it"]):
+            out = self.run_cli("--register", "chat", "--restyle-file", self.restyle_file(), *extra)
+            self.assertEqual(out.strip().splitlines()[-1], CC.RESTYLE_TIP, extra)
+        self.assertEqual(CC.RESTYLE_TIP, "Tip: drafts from your own one-line point sound most like you; "
+                                         "add --point '<what you want to say>' or use --notes.")
+        self.assertNotIn("Tip:", self.run_cli("--register", "chat", "--notes", "yes, still on"))
+
+    def test_mutual_exclusion_and_misuse(self):
+        f = self.restyle_file()
+        err = io.StringIO()
+        for argv in (["--notes", "x", "--restyle-file", f], ["--notes-file", f, "--restyle-file", f]):
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
+                self.run_cli("--register", "chat", *argv)
+        self.assertIn("not allowed with argument", err.getvalue())
+        for argv in (["--notes", "x", "--keep", "all"], ["--notes", "x", "--point", "y"]):
+            with self.assertRaises(SystemExit) as cm:
+                self.run_cli("--register", "chat", *argv)
+            self.assertIn("--restyle-file", str(cm.exception.code))
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
+            self.run_cli("--register", "chat", "--keep", "some", "--restyle-file", f)
+        with self.assertRaises(SystemExit) as cm:
+            self.run_cli("--register", "chat", "--restyle-file", self.restyle_file("  \n"))
+        self.assertIn("empty", str(cm.exception.code))
+        with self.assertRaises(SystemExit) as cm:
+            self.run_cli("--register", "chat")
+        self.assertIn("--restyle-file", str(cm.exception.code))
+
+
 if __name__ == "__main__":
     unittest.main()

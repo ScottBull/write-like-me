@@ -51,7 +51,7 @@ Same question, three answers: "What's the best way to get rid of fruit flies in 
 
 To get one yourself: `/write-like-me:write-as-me reply to this: any tips for getting rid of fruit flies?`
 
-Each of these is a single sample from one author's pack, so your own pack gives you your own voice, and a re-run comes out somewhat different.
+Each of these is a single sample from one author's pack, so your own pack gives you your own voice, and a re-run comes out somewhat different. Those answers were written fresh from the question, which works well for a general how-to like this; for anything where what you'd say depends on what you know, your own notes work best.
 
 ## Install
 
@@ -79,6 +79,8 @@ Then restart Claude Code or run `/reload-plugins`.
    /write-like-me:write-as-me reply to Dana: Thursday works, I'll bring the slides
    ```
    Or just say “write this in my voice: ...” or “draft an email to the team about ...”. Drafting happens in a `voice-writer` subagent, so your archive never ends up in your main conversation.
+
+   **Restyling text Claude already wrote:** paste it and say "rewrite this in my voice". By default it keeps only what you'd actually bother to mention, at about your length; say "keep everything" if you want all of it (`--keep all`). If you can, add your point in a few words too (`--point`). In testing, restyled text got spotted a lot more often than a draft from your own notes (about 60-85% in a lineup vs about 40%), because what gives it away is what Claude chose to say and how much, not the wording. So your own point helps.
 
 3. **Teach it** when you edit a draft before sending. Paste what you actually sent and say “here’s what I sent” (or run `/write-like-me:voice-learn`). It’ll propose one of three things, and only with your OK: adding the sent message to the archive (the strongest fix), a soft note, or a hard rule.
 
@@ -166,7 +168,7 @@ python3 -I ~/.claude/plugins/.../write-like-me/scripts/wlm.py --help
 | `discover`, `extract <source>`, `vendor-install teams`, `add-samples` | find and extract your sent writing |
 | `build` | clean, measure, write the archive and the pack files; upgrades a 0.1 pack in place |
 | `status` | what's in the pack (counts, archive sizes, defaults, format version) |
-| `context --register R --notes ... [--context ...] [--recipient X] [--subject S] [--budget N] [--strategy R\|D\|M\|T\|C\|P] [--person core\|full\|none] [--habits on\|off]` | select entries and write the draft's context files; prints their paths and counts |
+| `context --register R --notes ... \| --restyle-file F [--keep mine\|all] [--point TEXT] [--context ...] [--recipient X] [--subject S] [--budget N] [--strategy R\|D\|M\|T\|C\|P] [--person core\|full\|none] [--habits on\|off]` | select entries and write the draft's context files; prints their paths and counts |
 | `draft --system-file F --task-file T [--model M]` | one `claude -p` draft from those files (fallback when the subagent is unavailable) |
 | `lint --register R --file F` | hard-rule checks, plus the word count against your median |
 | `log-draft --register R --file F [--context-dir D]` | remember a final draft |
