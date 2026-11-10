@@ -5,7 +5,7 @@
 
 Commands (all data stays in the voice pack: $WRITE_LIKE_ME_PACK or ~/.claude/voice-pack):
   discover                         which sources exist on this machine (metadata only)
-  extract <source> [...]           claude_code | teams | outlook | files PATH | imessage
+  extract <source> [...]           claude_code | teams | outlook | files PATH | imessage | proofhq
   vendor-install teams [--yes]     install the optional Teams parser at pinned commits (dry run first)
   add-samples --register R --file F   pasted samples, separated by lines of ---
   build                            clean + measure + write archive/, profile.md, rules.md, stats.json
@@ -87,6 +87,24 @@ def cmd_extract(a):
             recs = files.extract(a.path, addresses=a.address or (), all_mine=a.all_mine, names=a.name or (),
                                  doc_register=a.register or "doc", stats=stats)
             name = "files-" + short_hash(os.path.abspath(os.path.expanduser(a.path)), n=8)
+        elif src == "proofhq":
+            from wlmlib.sources import proofhq
+            if not a.file:
+                if not a.link:
+                    sys.exit("extract proofhq needs --link <any proof or Workfront link> to print the export links, "
+                             "or --file <saved export page> (repeatable, '-' for stdin) to import them")
+                try:
+                    host = proofhq.host_from_link(a.link)
+                except ValueError as e:
+                    raise RuntimeError(str(e))
+                print(json.dumps(dict({"source": src, "ok": True, "step": "open_links", "host": host},
+                                      **proofhq.links(host, a.pages or 1)), indent=1))
+                return
+            try:
+                recs = proofhq.extract_files(a.file, stats=stats)
+            except OSError as e:
+                raise RuntimeError("could not read %s: %s" % (e.filename or "the file", e.strerror or e))
+            name = "proofhq"
         elif src == "imessage":
             from wlmlib.sources import imessage
             recs = imessage.extract(export_dir=a.export_dir, start_date=a.since, stats=stats)
@@ -268,7 +286,7 @@ def main(argv=None):
     sp.add_parser("discover").set_defaults(fn=cmd_discover)
 
     p = sp.add_parser("extract")
-    p.add_argument("source", choices=["claude_code", "teams", "outlook", "files", "imessage"])
+    p.add_argument("source", choices=["claude_code", "teams", "outlook", "files", "imessage", "proofhq"])
     p.add_argument("--replace-empty", action="store_true",
                    help="allow a run that finds 0 messages to clear this source's earlier extract")
     p.add_argument("path", nargs="?")
@@ -280,6 +298,9 @@ def main(argv=None):
     p.add_argument("--no-ai-check", action="store_true", help="skip the slow pasted-Claude-text check")
     p.add_argument("--export-dir", help="existing imessage-exporter txt export")
     p.add_argument("--since", help="imessage start date YYYY-MM-DD")
+    p.add_argument("--link", help="proofhq: any proof or Workfront link (only its host is used); prints the export links")
+    p.add_argument("--pages", type=int, help="proofhq: how many export links to print (2000 comments each; default 1)")
+    p.add_argument("--file", action="append", help="proofhq: a saved export page (repeatable; '-' reads stdin)")
     p.set_defaults(fn=cmd_extract)
 
     p = sp.add_parser("vendor-install", help="install the optional Teams cache parser (pinned)")

@@ -64,6 +64,8 @@ In Claude Code:
 
 Then restart Claude Code or run `/reload-plugins`.
 
+To update later, run `/plugin marketplace update write-like-me`, then `/reload-plugins`. To add a new source to a pack you already have, run `/write-like-me:voice-setup` again and choose to add sources.
+
 **Upgrading from 0.1:** Run `/write-like-me:voice-setup` (or `wlm build`) once. It rebuilds your pack in the new archive format from your extracted sources, and keeps your own rules, learned notes and logged drafts. `wlm status` will let you know when a pack needs this.
 
 ## Quickstart
@@ -96,6 +98,7 @@ Then restart Claude Code or run `/reload-plugins`.
 | Folder of `.txt` / `.md` / `.eml` / `.mbox` | doc / email | any | Email is kept only when it's from your address. A Gmail Takeout of your Sent label works. |
 | Pasted samples | any | any | Paste messages into the chat. Public posts and comments (Reddit, forums) go in as register `post`. |
 | iMessage via [imessage-exporter](https://github.com/ReagentX/imessage-exporter) | chat | macOS | Optional. Needs `brew install imessage-exporter` and Full Disk Access for your terminal. |
+| ProofHQ / Workfront Proof comments | review | any | Your proof comments and replies, plus the comment each reply answered. Paste any proof link so setup knows your Workfront address, then open one link in your own signed-in browser and save the page. The plugin never touches your sign-in. Workfront keeps a copy of most proof comments, not all, and standalone ProofHQ accounts aren't covered. |
 
 Each draft uses the archive for the register you’re writing in. If a register has no samples, it borrows the closest one and tells you (documents borrow from your posts). **More samples help most where you have the fewest.** If you only have a couple dozen emails, email drafts end up leaning on generic email habits.
 
@@ -106,7 +109,7 @@ Each draft uses the archive for the register you’re writing in. If a register 
 - **What a draft sends to the model:** about 10,000 tokens of your real messages, any `learned.md` notes for that register and recipient, and your notes for the new message. That goes to whatever model and account your Claude Code uses, same as anything else you paste into Claude Code. The `wlm draft` fallback and `voice-check` call your own `claude` login with the prompt on stdin, never on the command line. The child process never sees `ANTHROPIC_API_KEY`, so calls stay on your Claude Code login (set `WRITE_LIKE_ME_KEEP_API_KEY=1` if your Claude Code itself runs on an API key). If you start Claude Code through a wrapper script, point `WRITE_LIKE_ME_CLAUDE` at it and these calls will use it too.
 - **`voice-check`** sends the held-out messages (to summarise them), one draft call and one plain baseline per held-out message, and, if you use the optional LLM judge, the held-out and generated messages. `prepare` prints how many calls it’ll make before it starts.
 - **The optional person file** (below) is a profile of you saved on disk. It’s built by model calls over the sources you pick, in ~40k-token chunks, after a dry run that shows you the number of calls.
-- **Workplace data:** Teams, Outlook and work documents belong to your employer. Check your employer’s policy on using work messages with AI tools before using any of those sources. Setup will remind you and ask first.
+- **Workplace data:** Teams, Outlook, ProofHQ comments and work documents belong to your employer. Check your employer’s policy on using work messages with AI tools before using any of those sources. Setup will remind you and ask first.
 - **To delete everything:** just remove the pack folder.
 
 ## How it works

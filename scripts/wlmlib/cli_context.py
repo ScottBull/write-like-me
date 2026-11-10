@@ -60,9 +60,9 @@ TIER_MARK = re.compile(r"<!--\s*tier\s*:\s*full\s*-->", re.I)   # not "<!-- /tie
 COMMENT = re.compile(r"<!--.*?-->", re.S)
 KEEP_DIRS = 30
 # Where to look when the register has no archive (the old `kit` fallback order).
-FALLBACK = {"chat": ["email", "post", "doc", "prompt"], "email": ["chat", "post", "doc", "prompt"],
-            "doc": ["post", "email", "chat", "prompt"], "prompt": ["chat", "email", "post", "doc"],
-            "post": ["doc", "chat", "email", "prompt"]}
+FALLBACK = {"chat": ["email", "post", "review", "doc", "prompt"], "email": ["chat", "post", "doc", "review", "prompt"],
+            "doc": ["post", "email", "chat", "review", "prompt"], "prompt": ["chat", "email", "post", "doc", "review"],
+            "post": ["doc", "chat", "email", "review", "prompt"], "review": ["chat", "email", "post", "doc", "prompt"]}
 
 
 # Restyle wordings, verbatim from the restyle test (R-SHORT for "mine", R-DIRECT for "all").
@@ -74,7 +74,7 @@ RESTYLE_TIP = ("Tip: drafts from your own one-line point sound most like you; "
                "add --point '<what you want to say>' or use --notes.")
 KEEP_CHOICES = ("mine", "all")
 # An archive whose entries all come from one of these sources names the platform in the framing.
-PLATFORMS = {"teams": "Teams", "imessage": "iMessage", "reddit": "Reddit"}
+PLATFORMS = {"teams": "Teams", "imessage": "iMessage", "reddit": "Reddit", "proofhq": "ProofHQ"}
 
 
 def _platform(pack, register):
@@ -96,6 +96,9 @@ def restyle_where(register, recipient="", subject="", platform=""):
         return "This is an email to %s%s." % (to or "someone", (" about " + subject.strip()) if subject.strip() else "")
     if register == "doc":
         return "This is a document%s." % ((" for " + to) if to else "")
+    if register == "review":
+        kind = (platform + " proof comment") if platform else "comment on a proof under review"
+        return "This is a %s%s." % (kind, (" replying to " + to) if to else "")
     return "This is a prompt to an AI assistant."
 
 

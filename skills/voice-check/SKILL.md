@@ -1,7 +1,7 @@
 ---
 name: voice-check
 description: Optional evaluation of the user's voice pack. Holds out some of their real messages, has the plugin write each one from a content-only summary, then builds a blind-test page in two parts (pairs: pick your real message; lineups: four messages, three yours, spot the one you didn't write) and scores stylometric closeness plus an LLM judge on both. Use when the user asks "how good is my voice pack", "test it", "does it sound like me", or wants a blind test.
-argument-hint: "[register: chat|email|doc|post|prompt] [paired messages, default 10] [lineups, default 10]"
+argument-hint: "[register: chat|email|doc|post|prompt|review] [paired messages, default 10] [lineups, default 10]"
 ---
 
 # Voice check

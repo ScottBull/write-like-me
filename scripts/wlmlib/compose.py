@@ -23,6 +23,7 @@ KIND = {
     "doc": ("passage", "passages of documents", "documents"),
     "prompt": ("prompt", "prompts to an AI assistant", "prompts to an AI assistant"),
     "post": ("comment", "posts and comments", "a public forum (Reddit)"),
+    "review": ("review comment", "review comments", "comments on proofs under review (ProofHQ / Workfront Proof)"),
 }
 
 
@@ -52,6 +53,10 @@ CONTEXT_WORDS = {
                "entry_shows": "the date, a shortened version of the assistant's reply I was answering (when "
                               "there was one)",
                "new_one": "the assistant's latest reply"},
+    "review": {"kinds": "comments on proofs under review", "kind": "comment", "wrote": "wrote",
+               "entry_shows": "who wrote the comment I was replying to, the date, a shortened version of that "
+                              "comment (when there was one)",
+               "new_one": "a new proof comment I'm replying to"},
 }
 CONTEXT_KEYS = ("archive", "wrote", "entry_shows", "kind", "new_one", "person", "person_text", "entries", "task",
                 "learned", "learned_text", "habits", "habits_text")
@@ -136,6 +141,9 @@ def render_task(context, notes, recipient="", register="chat", subject=""):
     if register in ("chat", "email"):
         parts.append("Message I'm replying to (may be empty if I'm starting the thread):\n<<<\n%s\n>>>"
                      % (ctx or "(none: I'm starting this one)"))
+    elif register == "review":
+        parts.append("Comment I'm replying to (may be empty if I'm starting a new comment on the proof):\n<<<\n%s\n>>>"
+                     % (ctx or "(none: this is a new comment)"))
     elif register == "post":
         parts.append("Post or comment I'm replying to (may be empty if I'm starting a new post):\n<<<\n%s\n>>>"
                      % (ctx or "(none: this is a new post)"))

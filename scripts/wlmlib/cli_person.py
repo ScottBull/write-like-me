@@ -24,7 +24,7 @@ from .common import pack_dir
 
 WHICH = {"personal": ["personal"], "work": ["work"], "both": ["personal", "work"]}
 LABELS = {"post": "posts", "chat": "personal chat", "doc": "docs", "teams": "Teams",
-          "outlook": "Outlook", "claude_code": "Claude Code prompts"}
+          "outlook": "Outlook", "claude_code": "Claude Code prompts", "proofhq": "ProofHQ comments"}
 UNSORTED_LABELS = {"file": "docs and chat from `extract files`", "pasted": "pasted chat and doc samples",
                    "learned": "docs added by `learn add`"}
 

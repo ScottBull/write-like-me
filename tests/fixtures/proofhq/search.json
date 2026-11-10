@@ -1,0 +1,140 @@
+{
+ "data": [
+  {
+   "ID": "n01",
+   "objCode": "NOTE",
+   "noteText": "Proof Comment: STET\n\nThe weight matches the design system, so it stays as is.",
+   "entryDate": "2026-03-02T09:15:30:120-1000",
+   "isReply": true,
+   "isDeleted": false,
+   "documentID": "doc-a",
+   "threadID": "p01",
+   "parentNoteID": "p01",
+   "owner": {
+    "ID": "u1",
+    "name": "Jordan Example"
+   },
+   "parentNote": {
+    "ID": "p01",
+    "objCode": "NOTE",
+    "noteText": "Proof Comment: Can we make the headline bolder here?",
+    "owner": {
+     "ID": "u2",
+     "name": "Riley Sample"
+    }
+   }
+  },
+  {
+   "ID": "n02",
+   "objCode": "NOTE",
+   "noteText": "Proof Comment: Yea, blue is intentional / it's the primary button style.  (Edited by Jordan Example)",
+   "entryDate": "2026-03-02T10:00:00:000-1000",
+   "isReply": true,
+   "isDeleted": false,
+   "documentID": "doc-a",
+   "threadID": "p02",
+   "parentNoteID": "p02",
+   "owner": {
+    "ID": "u1",
+    "name": "Jordan Example"
+   },
+   "parentNote": {
+    "ID": "p02",
+    "objCode": "NOTE",
+    "noteText": "Proof Comment:\n Jordan Example  is this button meant to be blue?",
+    "owner": {
+     "ID": "u2",
+     "name": "Riley Sample"
+    }
+   }
+  },
+  {
+   "ID": "n03",
+   "objCode": "NOTE",
+   "noteText": "Proof Comment: Spacing under the hero looks off on tablet.",
+   "entryDate": "2026-03-03T08:00:00:000-1000",
+   "isReply": false,
+   "isDeleted": false,
+   "documentID": "doc-a",
+   "threadID": "n03",
+   "parentNoteID": null,
+   "owner": {
+    "ID": "u1",
+    "name": "Jordan Example"
+   },
+   "parentNote": null
+  },
+  {
+   "ID": "n04",
+   "objCode": "NOTE",
+   "noteText": "Proof Comment: Fixed in the next round.",
+   "entryDate": "2026-03-04T08:00:00:000-1000",
+   "isReply": true,
+   "isDeleted": false,
+   "documentID": "doc-a",
+   "threadID": "n03",
+   "parentNoteID": "n03",
+   "owner": {
+    "ID": "u1",
+    "name": "Jordan Example"
+   },
+   "parentNote": {
+    "ID": "n03",
+    "objCode": "NOTE",
+    "noteText": "Proof Comment: Spacing under the hero looks off on tablet.",
+    "owner": {
+     "ID": "u1",
+     "name": "Jordan Example"
+    }
+   }
+  },
+  {
+   "ID": "n05",
+   "objCode": "NOTE",
+   "noteText": "Proof Comment: This one was deleted.",
+   "entryDate": "2026-03-04T09:00:00:000-1000",
+   "isReply": false,
+   "isDeleted": true,
+   "documentID": "doc-a",
+   "threadID": "n05",
+   "parentNoteID": null,
+   "owner": {
+    "ID": "u1",
+    "name": "Jordan Example"
+   },
+   "parentNote": null
+  },
+  {
+   "ID": "n06",
+   "objCode": "NOTE",
+   "noteText": "Not a proof comment, but it mentions Proof Comment: in passing.",
+   "entryDate": "2026-03-05T09:00:00:000-1000",
+   "isReply": false,
+   "isDeleted": false,
+   "documentID": "doc-a",
+   "threadID": "n06",
+   "parentNoteID": null,
+   "owner": {
+    "ID": "u1",
+    "name": "Jordan Example"
+   },
+   "parentNote": null
+  },
+  {
+   "ID": "n07",
+   "objCode": "NOTE",
+   "noteText": "Proof Comment:   ",
+   "entryDate": "2026-03-05T10:00:00:000-1000",
+   "isReply": false,
+   "isDeleted": false,
+   "documentID": "doc-a",
+   "threadID": "n07",
+   "parentNoteID": null,
+   "owner": {
+    "ID": "u1",
+    "name": "Jordan Example"
+   },
+   "parentNote": null
+  }
+ ]
+}

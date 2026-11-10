@@ -20,9 +20,9 @@ Run `wlm status` before anything else. If it says there is no pack (`"built": fa
 ## 1. Understand the request
 
 Work out, asking only if it's genuinely unclear:
-- **register**: `chat` (Teams/Slack/iMessage/SMS), `email`, `doc` (longer prose: documents, notes), `post` (public posts and comments: Reddit, forums), or `prompt` (to an AI). Default to chat for short replies, email when they say email, post when they mention Reddit or a forum.
-- **recipient** name, if any (for `post`, the subreddit or forum).
-- **context**: the message they're replying to (for `post`, the post or comment), if they pasted or described it.
+- **register**: `chat` (Teams/Slack/iMessage/SMS), `email`, `doc` (longer prose: documents, notes), `post` (public posts and comments: Reddit, forums), `review` (a comment or reply on a proof under review: ProofHQ / Workfront Proof), or `prompt` (to an AI). Default to chat for short replies, email when they say email, post when they mention Reddit or a forum, review when it's a proof comment or a reply to a reviewer.
+- **recipient** name, if any (for `post`, the subreddit or forum; for `review`, the reviewer whose comment they're answering).
+- **context**: the message they're replying to (for `post`, the post or comment; for `review`, the reviewer's comment), if they pasted or described it.
 - **notes**: what the message must say. Keep it to the user's content; don't add points.
 - **subject** for a new email, if given.
 - **restyle or not**: if the user pastes text (often something Claude wrote) and asks to rewrite it in their voice ("make this sound like me", "put this in my words"), this is a restyle: the pasted text takes the place of the notes (step 2, restyle). Note whether they said to keep everything, and whether they gave their own point in a phrase ("basically I want to say it's fine").

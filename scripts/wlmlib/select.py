@@ -54,6 +54,7 @@ CONTEXT_LINE = {"chat": ("Replying to", "(nothing: I started this one)"),
                 "email": ("Replying to", "(nothing: I started this one)"),
                 "prompt": ("Replying to", "(nothing: I started this one)"),
                 "post": ("Replying to", "(nothing: this is a new post)"),
+                "review": ("Replying to", "(nothing: this is a new comment on the proof)"),
                 "doc": ("Following", "(nothing: this is where it starts)")}
 
 
@@ -73,7 +74,7 @@ def entry_header(e, register=None):
     date = (e.get("timestamp") or "")[:10] or "undated"
     who = _flat(e.get("recipient"))
     parts = []
-    if reg in ("chat", "email") and who:
+    if reg in ("chat", "email", "review") and who:
         parts.append("to %s" % who)
     elif reg == "post" and who:
         parts.append(who)

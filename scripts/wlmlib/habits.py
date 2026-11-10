@@ -30,7 +30,7 @@ CLOSING = "These describe the archive as a whole; any single message usually has
 MARKS = (("dash", "a dash (em, en or double hyphen)"), ("semicolon", "a semicolon"),
          ("exclaim", "an exclamation mark"))
 KINDS = {"chat": "chat messages", "email": "emails", "post": "posts and comments", "doc": "passages",
-         "prompt": "prompts"}
+         "prompt": "prompts", "review": "review comments"}
 
 
 def _in_range(p):

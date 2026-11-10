@@ -47,6 +47,8 @@ def discover():
     S["imessage"] = {"available": ok and readable, "register": "chat",
                      "detail": why if not ok else ("ok" if readable else
                                                    "needs Full Disk Access for your terminal app")}
+    S["proofhq"] = {"available": True, "register": "review",
+                    "detail": "ProofHQ / Workfront proof comments: you open a link in your signed-in browser and save the page"}
     S["files"] = {"available": True, "register": "email/doc",
                   "detail": "a folder of .txt/.md/.eml/.mbox you choose (e.g. a Sent-mail export)"}
     S["paste"] = {"available": True, "register": "any", "detail": "samples you paste in"}

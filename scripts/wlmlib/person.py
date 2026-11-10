@@ -66,7 +66,7 @@ BLACKLIST = "person.blacklist.json"
 CACHE_DIR = os.path.join("work", "person-cache")
 SIDECAR_VERSION = 1
 
-WORK_SOURCES = ("teams", "outlook", "claude_code")
+WORK_SOURCES = ("teams", "outlook", "claude_code", "proofhq")
 PERSONAL_REGISTERS = ("post", "chat", "doc")
 # A `wlm learn add` chat reply may have gone to a work chat: left out of both files.
 AMBIGUOUS = {("learned", "chat")}
@@ -100,6 +100,9 @@ SOURCE_NOTES = {
     "doc": "These entries are passages from documents the person wrote.",
     "teams": "These entries are the person's own messages in their employer's work chat, with the "
              "message before each where known. Keep every project, client and product at a generic level.",
+    "proofhq": "These entries are the person's own comments and replies on proofs under review at work "
+               "(ProofHQ / Workfront Proof), with the comment each replied to where known. Keep every "
+               "project, client, brand and product at a generic level.",
     "outlook": "These entries are emails the person sent at work. Keep every project, client and product "
                "at a generic level.",
     "claude_code": "These entries are the person's own typed prompts to an AI coding assistant (Claude "
@@ -280,10 +283,11 @@ def to_item(e):
     elif e.get("source") == "teams":
         setting = "work chat"
     else:
-        setting = {"chat": "chat", "email": "email", "doc": "document", "prompt": ""}.get(reg, reg)
+        setting = {"chat": "chat", "email": "email", "doc": "document", "prompt": "",
+                   "review": "proof review comment"}.get(reg, reg)
     return {"id": e.get("id") or "", "date": (e.get("timestamp") or "")[:10] or "undated",
             "setting": setting, "context": (e.get("context") or "").strip(),
-            "context_label": "after" if reg in ("chat", "email") else "replying to", "text": text}
+            "context_label": "after" if reg in ("chat", "email", "review") else "replying to", "text": text}
 
 
 def select_entries(pack, include_unsorted=False):

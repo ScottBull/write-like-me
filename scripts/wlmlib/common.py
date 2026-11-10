@@ -6,13 +6,14 @@ import math
 import os
 import re
 
-REGISTERS = ("chat", "email", "doc", "prompt", "post")
+REGISTERS = ("chat", "email", "doc", "prompt", "post", "review")
 REGISTER_HELP = {
     "chat": "short messages: Teams, Slack, iMessage, SMS",
     "email": "email you sent",
     "doc": "longer prose: documents, notes",
     "prompt": "what you type to AI assistants (Claude Code)",
     "post": "public posts and comments: Reddit, forums",
+    "review": "review feedback: proof comments and replies (ProofHQ / Workfront Proof)",
 }
 
 # Record schema shared by every extractor (one JSON object per line):
